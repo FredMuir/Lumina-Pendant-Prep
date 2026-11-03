@@ -21,6 +21,17 @@ class GuiSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_png_export_failure_preserves_existing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "pendant.png"
+            path.write_bytes(b"previous image")
+            with patch("lumina_pendant_prep.app.os.replace", side_effect=OSError("replace failed")):
+                with self.assertRaises(OSError):
+                    MainWindow.write_png(Image.new("RGBA", (4, 4)), str(path))
+            self.assertEqual(path.read_bytes(), b"previous image")
+            self.assertEqual(list(root.iterdir()), [path])
+
     def test_project_relinks_moved_photo_and_preserves_current_image_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

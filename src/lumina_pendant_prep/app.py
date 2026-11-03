@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import os
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -459,7 +461,18 @@ class MainWindow(QMainWindow):
         path = Path(filename)
         if path.suffix.lower() != ".png":
             path = path.with_suffix(path.suffix + ".png" if path.suffix else ".png")
-        image.save(path, format="PNG", dpi=image.info.get("dpi", (300, 300)))
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w+b", dir=path.parent,
+                                             prefix=f".{path.name}.", suffix=".tmp", delete=False) as file:
+                temporary = Path(file.name)
+                image.save(file, format="PNG", dpi=image.info.get("dpi", (300, 300)))
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
         return str(path)
 
     def _project_data(self):
