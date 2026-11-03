@@ -158,10 +158,17 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
                 x0, y0 = max(0, x - 1), max(0, y - 1)
                 x1, y1 = min(width, x + box_w + 1), min(height, y + box_h + 1)
                 component = components[y0:y1, x0:x1] == component_id
-                if minimum_area <= area < minimum_area * 16:
-                    distance = cv2.distanceTransform(component.astype(np.uint8), cv2.DIST_L2, 3)
-                    if float(distance.max()) * 2 < minimum_feature_px:
+                if area >= minimum_area:
+                    if min(box_w, box_h) < minimum_feature_px:
                         narrow_features += 1
+                    else:
+                        # Add background around image-edge components too;
+                        # OpenCV otherwise has no outside pixels to measure.
+                        padded = cv2.copyMakeBorder(component.astype(np.uint8), 1, 1, 1, 1,
+                                                    cv2.BORDER_CONSTANT, value=0)
+                        distance = cv2.distanceTransform(padded, cv2.DIST_L2, 3)
+                        if float(distance.max()) * 2 < minimum_feature_px:
+                            narrow_features += 1
                 if area >= minimum_area:
                     continue
                 local_opaque = opaque[y0:y1, x0:x1]

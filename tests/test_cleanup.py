@@ -92,6 +92,16 @@ class CleanupTests(unittest.TestCase):
         self.assertGreaterEqual(result.narrow_features, 1)
         self.assertEqual(len(np.unique(output[50, 20:80, :3], axis=0)), 1)
 
+    def test_reports_long_narrow_region_even_when_area_is_large(self):
+        pixels = np.empty((80, 1000, 4), dtype=np.uint8)
+        pixels[:] = (220, 25, 30, 255)
+        pixels[40, :] = (20, 190, 50, 255)
+        result = simplify_image(Image.fromarray(pixels, "RGBA"), CleanupSettings(
+            colors=4, target_width_mm=1000, min_feature_mm=4, color_delta=0,
+        ))
+        self.assertEqual(result.narrow_features, 1)
+        self.assertEqual(result.image.getpixel((500, 40))[:3], (20, 190, 50))
+
     def test_zero_feature_threshold_skips_island_merging(self):
         pixels = np.zeros((20, 20, 4), dtype=np.uint8)
         pixels[:] = (230, 20, 30, 255)
