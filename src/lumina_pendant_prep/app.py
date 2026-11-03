@@ -581,7 +581,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "已导出", f"透明 PNG 已保存：\n{filename}\n\n"
                                     f"目标尺寸约 {width_mm:g} × {height_mm:.2f} mm；{hole_info}\n"
                                     f"导入 Lumina 时请将目标宽度设为 {width_mm:g} mm，"
-                                    "否则孔和成品尺寸会按比例改变。")
+                                    "否则孔和成品尺寸会按比例改变。\n"
+                                    "孔径是图片中的设计值；建模和切片可能改变实际开口，请检查切片结果。")
         except OSError as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
 

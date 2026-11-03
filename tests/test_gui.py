@@ -366,6 +366,7 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertIn("60 × 33.75 mm", message)
             self.assertIn("挂绳孔直径约 4 mm", message)
             self.assertIn("目标宽度设为 60 mm", message)
+            self.assertIn("建模和切片可能改变实际开口", message)
             self.assertTrue(destination.exists())
             window.close()
 
