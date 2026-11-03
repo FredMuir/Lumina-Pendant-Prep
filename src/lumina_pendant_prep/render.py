@@ -31,7 +31,7 @@ def hole_has_clearance(image_size: tuple[int, int], settings: PendantSettings,
     offset_x = offset_y = 0
     if settings.shape == "Circle":
         side = min(source_w, source_h)
-        offset_x, offset_y = (source_w - side) / 2, (source_h - side) / 2
+        offset_x, offset_y = (source_w - side) // 2, (source_h - side) // 2
         width = height = side
     else:
         width, height = source_w, source_h
@@ -40,7 +40,10 @@ def hole_has_clearance(image_size: tuple[int, int], settings: PendantSettings,
     scale = width / settings.target_width_mm
     center_x = settings.hole_x * source_w - offset_x
     center_y = settings.hole_y * source_h - offset_y
-    required_margin = (settings.hole_diameter_mm / 2 + minimum_wall_mm) * scale
+    # Rendering rounds the radius to whole pixels and includes the ellipse's
+    # boundary pixel. Account for that before reserving the material wall.
+    rendered_radius = max(1, round(settings.hole_diameter_mm * scale / 2))
+    required_margin = rendered_radius + 1 + minimum_wall_mm * scale
 
     if settings.shape == "Circle":
         available = width / 2 - math.hypot(center_x - width / 2, center_y - height / 2)

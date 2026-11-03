@@ -59,6 +59,13 @@ class PendantRenderTests(unittest.TestCase):
         )
         self.assertFalse(hole_has_clearance((100, 100), settings))
 
+    def test_small_raster_hole_reserves_rounded_radius(self):
+        settings = PendantSettings(
+            crop=(0, 0, 1, 1), shape="Rectangle", target_width_mm=100,
+            hole_x=0.5, hole_y=0.1, hole_diameter_mm=1,
+        )
+        self.assertFalse(hole_has_clearance((20, 20), settings))
+
 
 if __name__ == "__main__":
     unittest.main()
