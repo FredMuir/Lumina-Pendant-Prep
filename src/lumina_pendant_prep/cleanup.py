@@ -5,7 +5,7 @@ import math
 
 import cv2
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,11 @@ class CleanupSettings:
 class CleanupResult:
     image: Image.Image
     changed_mask: Image.Image
+    quantized_mask: Image.Image
+    merged_mask: Image.Image
+    visible_pixels: int
+    quantized_pixels: int
+    merged_pixels: int
     original_colors: int
     resulting_colors: int
     merged_islands: int
@@ -116,6 +121,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
     original_colors = len(used)
     palette = quantized.getpalette() or []
     labs = _lab_palette(palette, used) if used else {}
+    initial_labels = labels.copy()
 
     _merge_adjacent_regions(labels, opaque, labs, settings.color_delta)
 
@@ -170,12 +176,20 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
         color = int(color)
         output_rgb[(labels == color) & opaque] = palette[color * 3:color * 3 + 3]
     output = Image.fromarray(np.dstack((output_rgb, alpha)), "RGBA")
+    palette_rgb = np.asarray(palette, dtype=np.uint8).reshape(-1, 3)
+    quantized_changed = np.any(palette_rgb[initial_labels] != rgb_pixels, axis=2) & opaque
+    merged_changed = (labels != initial_labels) & opaque
     original_rgb = rgb_pixels.astype(np.int16)
     changed = np.any(np.abs(output_rgb.astype(np.int16) - original_rgb) > 0, axis=2) & opaque
-    changed_mask = Image.fromarray((changed.astype(np.uint8) * 255), "L").filter(ImageFilter.MaxFilter(3))
+    changed_mask = Image.fromarray(changed.astype(np.uint8) * 255, "L")
     return CleanupResult(
         image=output,
         changed_mask=changed_mask,
+        quantized_mask=Image.fromarray(quantized_changed.astype(np.uint8) * 255, "L"),
+        merged_mask=Image.fromarray(merged_changed.astype(np.uint8) * 255, "L"),
+        visible_pixels=int(np.count_nonzero(opaque)),
+        quantized_pixels=int(np.count_nonzero(quantized_changed)),
+        merged_pixels=int(np.count_nonzero(merged_changed)),
         original_colors=original_colors,
         resulting_colors=len(np.unique(labels[opaque])) if np.any(opaque) else 0,
         merged_islands=merged_islands,

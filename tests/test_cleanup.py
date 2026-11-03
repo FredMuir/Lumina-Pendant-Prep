@@ -16,6 +16,19 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(result.image.getchannel("A").tobytes(), source.getchannel("A").tobytes())
         self.assertLessEqual(result.resulting_colors, 32)
         self.assertGreater(result.original_colors, 1)
+        self.assertGreater(result.quantized_pixels, 0)
+        self.assertEqual(result.quantized_pixels, np.count_nonzero(np.asarray(result.quantized_mask)))
+        self.assertEqual(result.merged_pixels, np.count_nonzero(np.asarray(result.merged_mask)))
+
+    def test_merge_mask_distinguishes_region_merge_from_quantization(self):
+        source = Image.new("RGBA", (10, 10), (220, 25, 30, 255))
+        source.putpixel((5, 5), (20, 40, 220, 255))
+        source.putpixel((0, 0), (20, 40, 220, 0))
+        result = simplify_image(source, CleanupSettings(2, 10, 2, 0))
+        self.assertEqual(result.quantized_pixels, 0)
+        self.assertEqual(result.merged_pixels, 1)
+        self.assertEqual(result.merged_mask.getpixel((5, 5)), 255)
+        self.assertEqual(result.merged_mask.getpixel((0, 0)), 0)
 
     def test_similar_color_merge_is_local_and_respects_transparency(self):
         labels = np.array([[1, 1, 2, 0, 1, 1, 0, 2]], dtype=np.uint8)

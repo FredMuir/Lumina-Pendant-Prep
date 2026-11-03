@@ -82,6 +82,8 @@ class MainWindow(QMainWindow):
         self.prepared: Image.Image | None = None
         self.output: Image.Image | None = None
         self.preview_changed: Image.Image | None = None
+        self.preview_quantized: Image.Image | None = None
+        self.preview_merged: Image.Image | None = None
         self.hole_safe = False
         self.generation = 0
         self.output_generation = -1
@@ -176,6 +178,10 @@ class MainWindow(QMainWindow):
         self.highlight_toggle = QCheckBox("标记已简化区域")
         self.highlight_toggle.toggled.connect(self._refresh_output_canvas)
         headings.addWidget(self.highlight_toggle)
+        self.highlight_mode = QComboBox()
+        self.highlight_mode.addItems(["所有变化", "颜色量化", "区域合并"])
+        self.highlight_mode.currentIndexChanged.connect(self._refresh_output_canvas)
+        headings.addWidget(self.highlight_mode)
         preview_layout.addLayout(headings)
         panes = QSplitter(Qt.Orientation.Horizontal)
         self.input_canvas = ImageCanvas(interactive=True)
@@ -333,6 +339,7 @@ class MainWindow(QMainWindow):
             return
         if self.shape.currentText() == "自定义多边形" and len(self.polygon) < 3:
             self.prepared = self.output = self.preview_changed = None
+            self.preview_quantized = self.preview_merged = None
             self.output_canvas.set_image(None)
             self.status.setText("请用多边形工具至少绘制三个节点，并右键完成轮廓。")
             return
@@ -355,13 +362,17 @@ class MainWindow(QMainWindow):
         self.prepared, self.output = prepared, output
         self.output_generation = generation
         self.preview_changed = result.changed_mask if result else None
+        self.preview_quantized = result.quantized_mask if result else None
+        self.preview_merged = result.merged_mask if result else None
         self._refresh_output_canvas()
         if result:
+            total = result.visible_pixels or 1
             hole_note = " · 孔附近的轮廓或透明区域无法留出材料边距；当前不会裁孔" if self.hole_toggle.currentIndex() == 0 and not self.hole_safe else ""
             self.status.setText(
                 f"预览就绪 · 调色 {result.original_colors} → {result.resulting_colors} 色 · "
                 f"合并 {result.merged_islands} 个小色岛 · 最小特征约 {result.minimum_feature_px}px "
                 f"(阈值不低于喷嘴 {self.nozzle_mm.currentData():.2f}mm) · 狭窄区域提示 {result.narrow_features} 个\n"
+                f"量化改变 {result.quantized_pixels / total:.1%} · 区域合并改变 {result.merged_pixels / total:.1%} 的轮廓内像素（孔切除前，可重叠）。\n"
                 f"孔和背景均导出为透明像素。{hole_note}"
             )
         else:
@@ -400,9 +411,10 @@ class MainWindow(QMainWindow):
             self.output_canvas.set_image(None)
             return
         preview = self.output
-        if self.highlight_toggle.isChecked() and self.preview_changed is not None and self.prepared is not None:
+        mask = (self.preview_changed, self.preview_quantized, self.preview_merged)[self.highlight_mode.currentIndex()]
+        if self.highlight_toggle.isChecked() and mask is not None and self.prepared is not None:
             tint = Image.new("RGBA", self.prepared.size, (255, 74, 65, 0))
-            changed_alpha = self.preview_changed.point(lambda value: value * 105 // 255)
+            changed_alpha = mask.point(lambda value: value * 105 // 255)
             changed_alpha = ImageChops.multiply(changed_alpha, self.prepared.getchannel("A"))
             tint.putalpha(changed_alpha)
             preview = make_pendant(Image.alpha_composite(self.prepared, tint), self._settings()[1])

@@ -53,6 +53,32 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertFalse(window.color_delta.isEnabled())
             window.close()
 
+    def test_real_photo_highlight_modes_do_not_change_export(self):
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "photo.png"
+            with Image.open(photo) as original:
+                original.resize((320, 180), Image.Resampling.LANCZOS).save(path)
+            window = MainWindow()
+            self.assertTrue(window.open_image(str(path)))
+            deadline = time.monotonic() + 20
+            while window.output_generation != window.generation and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.02)
+            self.assertEqual(window.output_generation, window.generation)
+            baseline = window.output.tobytes()
+            self.assertIn("量化改变", window.status.text())
+            self.assertIn("区域合并改变", window.status.text())
+            window.highlight_toggle.setChecked(True)
+            for mode in ("所有变化", "颜色量化", "区域合并"):
+                window.highlight_mode.setCurrentText(mode)
+                self.assertIsNotNone(window.output_canvas.image)
+                self.assertEqual(window.output.tobytes(), baseline)
+            destination = window.write_png(window.output, str(Path(directory) / "result.png"))
+            with Image.open(destination) as png:
+                self.assertEqual(png.convert("RGBA").tobytes(), baseline)
+            window.close()
+
     def test_heic_preview_exports_fully_transparent_hole(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
