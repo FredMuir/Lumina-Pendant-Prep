@@ -45,9 +45,6 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
     opaque = alpha > 0
     rgb_pixels = np.asarray(rgba.convert("RGB"), dtype=np.uint8).copy()
     if np.any(opaque) and np.any(~opaque):
-        rgb_pixels[~opaque] = np.median(rgb_pixels[opaque], axis=0).astype(np.uint8)
-    rgb = Image.fromarray(rgb_pixels, "RGB")
-    if np.any(opaque) and np.any(~opaque):
         # Transparent pixels must not consume palette entries or influence the
         # frequency of visible colors. Train on visible pixels only.
         visible = Image.fromarray(rgb_pixels[opaque].reshape(-1, 1, 3), "RGB")
@@ -57,6 +54,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
         labels = np.zeros(alpha.shape, dtype=np.uint8)
         labels[opaque] = np.asarray(trained, dtype=np.uint8).reshape(-1)
     else:
+        rgb = Image.fromarray(rgb_pixels, "RGB")
         quantized = rgb.quantize(colors=settings.colors, method=Image.Quantize.MEDIANCUT,
                                  dither=Image.Dither.NONE)
         labels = np.asarray(quantized, dtype=np.uint8).copy()
@@ -72,14 +70,14 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
         (labels[:-1, :], labels[1:, :], opaque[:-1, :] & opaque[1:, :]),
     )
     for a, b, edge_mask in edges:
-        pairs = np.stack((a[edge_mask], b[edge_mask]), axis=1)
-        if pairs.size:
-            pairs = np.sort(pairs, axis=1)
-            unique, counts = np.unique(pairs, axis=0, return_counts=True)
-            for pair, count in zip(unique, counts):
-                left, right = int(pair[0]), int(pair[1])
+        first, second = a[edge_mask].astype(np.uint16), b[edge_mask].astype(np.uint16)
+        if first.size:
+            low, high = np.minimum(first, second), np.maximum(first, second)
+            counts = np.bincount((low * 256 + high).astype(np.int32), minlength=65536)
+            for index in np.flatnonzero(counts):
+                left, right = divmod(int(index), 256)
                 if left != right:
-                    links[(left, right)] = links.get((left, right), 0) + int(count)
+                    links[(left, right)] = links.get((left, right), 0) + int(counts[index])
     parent = {color: color for color in used}
     color_counts = np.bincount(labels[opaque], minlength=256)
 
@@ -156,7 +154,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
         color = int(color)
         output_rgb[(labels == color) & opaque] = palette[color * 3:color * 3 + 3]
     output = Image.fromarray(np.dstack((output_rgb, alpha)), "RGBA")
-    original_rgb = np.asarray(rgb, dtype=np.int16)
+    original_rgb = rgb_pixels.astype(np.int16)
     changed = np.any(np.abs(output_rgb.astype(np.int16) - original_rgb) > 0, axis=2) & opaque
     changed_mask = Image.fromarray((changed.astype(np.uint8) * 255), "L").filter(ImageFilter.MaxFilter(3))
     return CleanupResult(
