@@ -51,6 +51,14 @@ class PendantRenderTests(unittest.TestCase):
         safe = PendantSettings(**{**settings.__dict__, "hole_y": 0.30})
         self.assertTrue(hole_has_clearance((480, 360), safe, minimum_wall_mm=1.2))
 
+    def test_polygon_hole_respects_crop_boundary(self):
+        settings = PendantSettings(
+            crop=(0.25, 0.25, 0.75, 0.75), shape="Polygon",
+            target_width_mm=50, hole_x=0.5, hole_y=0.02,
+            hole_diameter_mm=4, polygon=((0, 0), (1, 0), (1, 1), (0, 1)),
+        )
+        self.assertFalse(hole_has_clearance((100, 100), settings))
+
 
 if __name__ == "__main__":
     unittest.main()

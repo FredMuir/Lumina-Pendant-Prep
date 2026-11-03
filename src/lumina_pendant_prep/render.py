@@ -59,7 +59,11 @@ def hole_has_clearance(image_size: tuple[int, int], settings: PendantSettings,
             length2 = dx * dx + dy * dy
             t = 0 if length2 == 0 else max(0, min(1, ((center_x - ax) * dx + (center_y - ay) * dy) / length2))
             min_distance = min(min_distance, math.hypot(center_x - (ax + t * dx), center_y - (ay + t * dy)))
-        available = min_distance if inside else -min_distance
+        polygon_margin = min_distance if inside else -min_distance
+        # The polygon is clipped by the cropped image, so both boundaries
+        # constrain the material surrounding a hole.
+        available = min(polygon_margin, center_x, center_y,
+                        width - center_x, height - center_y)
     elif settings.shape == "Rounded rectangle":
         radius = min(min(width, height) / 2, settings.corner_radius_mm * scale)
         if center_x < radius and center_y < radius:
@@ -105,8 +109,8 @@ def make_pendant(image: Image.Image, settings: PendantSettings) -> Image.Image:
         draw.rounded_rectangle((0, 0, w * supersample - 1, h * supersample - 1), radius=radius, fill=255)
     elif settings.shape == "Polygon" and len(settings.polygon) >= 3:
         points = [
-            (round((x - left) / max(right - left, 0.001) * w * supersample),
-             round((y - top) / max(bottom - top, 0.001) * h * supersample))
+            (round((x * width - x0) * supersample),
+             round((y * height - y0) * supersample))
             for x, y in settings.polygon
         ]
         draw.polygon(points, fill=255)
