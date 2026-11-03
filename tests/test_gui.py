@@ -227,6 +227,7 @@ class GuiSmokeTests(unittest.TestCase):
             original_bytes = source.read_bytes()
             window = MainWindow()
             self.assertTrue(window.open_image(str(source)))
+            window.hole_toggle.setCurrentIndex(1)
             window.timer.stop()
             window.output = window.source.copy()
             window.output_generation = window.generation
@@ -250,6 +251,39 @@ class GuiSmokeTests(unittest.TestCase):
                 pass  # Some filesystems do not support hard links.
             else:
                 self.assertTrue(window._is_source_path(alias))
+            window.close()
+
+    def test_unsafe_requested_hole_blocks_export_until_explicitly_disabled(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow()
+            window.cleanup_toggle.setCurrentText("保留原色")
+            self.assertTrue(window.open_image(str(photo)))
+            window._set_hole(0.01, 0.01)
+            deadline = time.monotonic() + 20
+            while window.output_generation != window.generation and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.02)
+            self.assertEqual(window.output_generation, window.generation)
+            self.assertFalse(window.hole_safe)
+            with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName") as dialog, \
+                 patch("lumina_pendant_prep.app.QMessageBox.information") as notice:
+                window.export_png()
+                dialog.assert_not_called()
+                self.assertEqual(notice.call_args.args[1], "挂绳孔无法裁切")
+            window.hole_toggle.setCurrentIndex(1)
+            deadline = time.monotonic() + 20
+            while window.output_generation != window.generation and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.02)
+            self.assertEqual(window.output_generation, window.generation)
+            destination = root / "without-hole.png"
+            with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName",
+                       return_value=(str(destination), "")), \
+                 patch("lumina_pendant_prep.app.QMessageBox.information"):
+                window.export_png()
+            self.assertTrue(destination.exists())
             window.close()
 
     def test_project_relinks_moved_photo_and_preserves_current_image_on_failure(self):

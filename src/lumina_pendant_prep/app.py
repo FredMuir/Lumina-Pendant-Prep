@@ -508,6 +508,11 @@ class MainWindow(QMainWindow):
         if self.output_generation != self.generation:
             QMessageBox.information(self, "预览尚未更新", "请等待当前设置的预览完成后再导出。")
             return
+        if self.hole_toggle.currentIndex() == 0 and not self.hole_safe:
+            QMessageBox.information(self, "挂绳孔无法裁切",
+                                    "当前孔的位置、大小或周围透明区域无法留出足够边距，预览中没有裁孔。"
+                                    "请调整孔位置或孔径；如不需要孔，请先关闭挂绳孔。")
+            return
         default = (self.source_path.stem if self.source_path else "pendant") + "-pendant.png"
         filename, _ = QFileDialog.getSaveFileName(self, "导出透明 PNG", default, "PNG 图像 (*.png)")
         if not filename:
