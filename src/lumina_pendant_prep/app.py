@@ -6,7 +6,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -30,13 +30,14 @@ class PreviewSignals(QObject):
 
 class PreviewJob(QRunnable):
     def __init__(self, generation: int, image: Image.Image, cleanup: CleanupSettings,
-                 pendant: PendantSettings, enabled: bool):
+                 pendant: PendantSettings, enabled: bool, protected_regions=()):
         super().__init__()
         self.generation = generation
         self.image = image.copy()
         self.cleanup = cleanup
         self.pendant = pendant
         self.enabled = enabled
+        self.protected_regions = tuple(tuple(region) for region in protected_regions)
         self.signals = PreviewSignals()
 
     def run(self):
@@ -53,11 +54,18 @@ class PreviewJob(QRunnable):
                     y0 += (y1 - y0 - side) // 2
                 selection = Image.new("L", self.image.size, 0)
                 selection.paste(outline.getchannel("A"), (x0, y0))
+                protection = Image.new("L", self.image.size, 0)
+                draw = ImageDraw.Draw(protection)
+                for region in self.protected_regions:
+                    left, top, right, bottom = crop_pixel_box(self.image.size, region)
+                    draw.rectangle((left, top, right - 1, bottom - 1), fill=255)
+                selection = ImageChops.multiply(selection, ImageChops.invert(protection))
                 analysis_image = self.image.convert("RGBA")
                 original_alpha = analysis_image.getchannel("A")
                 analysis_image.putalpha(selection)
                 result = simplify_image(analysis_image, self.cleanup)
                 prepared = result.image
+                prepared.paste(self.image.convert("RGBA"), mask=protection)
                 prepared.putalpha(original_alpha)
             else:
                 result = None
@@ -79,6 +87,7 @@ class MainWindow(QMainWindow):
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.hole = (0.5, 0.12)
         self.polygon: list[tuple[float, float]] = []
+        self.protected_regions: list[tuple[float, float, float, float]] = []
         self.prepared: Image.Image | None = None
         self.output: Image.Image | None = None
         self.preview_changed: Image.Image | None = None
@@ -146,7 +155,7 @@ class MainWindow(QMainWindow):
         shape_form = QFormLayout(shape_group)
         self.shape = QComboBox(); self.shape.addItems(["圆角矩形", "矩形", "圆形", "自定义多边形"])
         self.corner_mm = self._double(3, 0, 30, 0.5)
-        self.crop_tool = QComboBox(); self.crop_tool.addItems(["拖动设置裁切框", "点击设置孔位置", "点击绘制多边形"])
+        self.crop_tool = QComboBox(); self.crop_tool.addItems(["拖动设置裁切框", "点击设置孔位置", "点击绘制多边形", "拖动添加保护区域"])
         self.hole_toggle = QComboBox(); self.hole_toggle.addItems(["启用透明挂绳孔", "关闭挂绳孔"])
         self.hole_mm = self._double(4, 0.5, 30, 0.5)
         shape_form.addRow("外形", self.shape)
@@ -155,13 +164,16 @@ class MainWindow(QMainWindow):
         shape_form.addRow("挂绳孔", self.hole_toggle)
         shape_form.addRow("孔径 (mm)", self.hole_mm)
         control_layout.addWidget(shape_group)
-        edit_hint = QLabel("拖动照片设置裁切框；点击孔位置工具后可定位挂绳孔。绘制多边形：左键添加节点，右键结束。")
+        edit_hint = QLabel("拖动照片设置裁切框或添加保护区域；保护区域保留原色。绘制多边形：左键添加节点，右键结束。")
         edit_hint.setWordWrap(True)
         edit_hint.setStyleSheet("color:#9caab7;padding:4px")
         control_layout.addWidget(edit_hint)
         self.reset_crop = QPushButton("重置裁切框")
         self.reset_crop.clicked.connect(self.reset_geometry)
         control_layout.addWidget(self.reset_crop)
+        clear_protection = QPushButton("清除保护区域")
+        clear_protection.clicked.connect(self._clear_protection)
+        control_layout.addWidget(clear_protection)
         self.status = QLabel("打开一张照片开始处理。")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color:#b8c2cc;padding:8px")
@@ -197,9 +209,10 @@ class MainWindow(QMainWindow):
         self.input_canvas.cropChanged.connect(self._set_crop)
         self.input_canvas.holeMoved.connect(self._set_hole)
         self.input_canvas.polygonChanged.connect(self._set_polygon)
+        self.input_canvas.protectionAdded.connect(self._add_protection)
         self.input_canvas.outlineFinished.connect(lambda: self.crop_tool.setCurrentIndex(0))
         self.crop_tool.currentIndexChanged.connect(
-            lambda i: self.input_canvas.set_mode(["crop", "hole", "outline"][i])
+            lambda i: self.input_canvas.set_mode(["crop", "hole", "outline", "protect"][i])
         )
         for widget in (self.width_mm, self.min_feature_mm, self.colors, self.color_delta,
                        self.shape, self.corner_mm, self.hole_toggle, self.hole_mm,
@@ -259,10 +272,12 @@ class MainWindow(QMainWindow):
         self.source, self.source_path = image, Path(filename)
         self.crop, self.hole = (0.0, 0.0, 1.0, 1.0), (0.5, 0.12)
         self.polygon = []
+        self.protected_regions = []
         self.undo_stack.clear()
         self.redo_stack.clear()
         self._history_current = self._project_data()
         self.input_canvas.set_image(image)
+        self.input_canvas.set_protected_regions(self.protected_regions)
         self.source_info.setText(f"{self.source_path.name}  ·  {image.width} × {image.height} px")
         self._update_enabled()
         self._schedule_preview()
@@ -283,10 +298,24 @@ class MainWindow(QMainWindow):
         self._sync_geometry()
         self._schedule_preview()
 
+    def _add_protection(self, region):
+        if len(self.protected_regions) >= 100:
+            self.status.setText("保护区域最多 100 个；可先清除后重新绘制。")
+            return
+        self.protected_regions.append(tuple(region))
+        self._sync_geometry()
+        self._schedule_preview()
+
+    def _clear_protection(self):
+        if self.protected_regions:
+            self.protected_regions = []
+            self._sync_geometry()
+            self._schedule_preview()
+
     def reset_geometry(self):
         self.crop, self.hole = (0.0, 0.0, 1.0, 1.0), (0.5, 0.12)
         self.polygon = []
-        self.input_canvas.set_mode(["crop", "hole", "outline"][self.crop_tool.currentIndex()])
+        self.input_canvas.set_mode(["crop", "hole", "outline", "protect"][self.crop_tool.currentIndex()])
         self._sync_geometry()
         self._schedule_preview()
 
@@ -297,6 +326,7 @@ class MainWindow(QMainWindow):
         output_width = pendant_pixel_width(self.source.size, self.crop, shape)
         fraction = self.hole_mm.value() / self.width_mm.value() * output_width / self.source.width
         self.input_canvas.set_geometry(self.crop, self.hole, fraction, self.polygon)
+        self.input_canvas.set_protected_regions(self.protected_regions)
 
     def _settings(self):
         crop_left, crop_top, crop_right, crop_bottom = self.crop
@@ -345,7 +375,7 @@ class MainWindow(QMainWindow):
             return
         cleanup, pendant = self._settings()
         job = PreviewJob(self.generation, self.source, cleanup, pendant,
-                         self.cleanup_toggle.currentIndex() == 0)
+                         self.cleanup_toggle.currentIndex() == 0, self.protected_regions)
         self.active_job = job
         job.signals.finished.connect(self._preview_ready)
         job.signals.failed.connect(self._preview_failed)
@@ -372,7 +402,7 @@ class MainWindow(QMainWindow):
                 f"预览就绪 · 调色 {result.original_colors} → {result.resulting_colors} 色 · "
                 f"合并 {result.merged_islands} 个小色岛 · 最小特征约 {result.minimum_feature_px}px "
                 f"(阈值不低于喷嘴 {self.nozzle_mm.currentData():.2f}mm) · 狭窄区域提示 {result.narrow_features} 个\n"
-                f"量化改变 {result.quantized_pixels / total:.1%} · 区域合并改变 {result.merged_pixels / total:.1%} 的轮廓内像素（孔切除前，可重叠）。\n"
+                f"量化改变 {result.quantized_pixels / total:.1%} · 区域合并改变 {result.merged_pixels / total:.1%} 的待处理像素（孔切除前、不含保护区域，可重叠）。\n"
                 f"孔和背景均导出为透明像素。{hole_note}"
             )
         else:
@@ -450,6 +480,7 @@ class MainWindow(QMainWindow):
             self.crop = tuple(data.get("crop", self.crop))
             self.hole = tuple(data.get("hole", self.hole))
             self.polygon = [tuple(point) for point in data.get("polygon", [])]
+            self.protected_regions = [tuple(region) for region in data.get("protected_regions", [])]
             self.width_mm.setValue(data.get("target_width_mm", 60))
             self.nozzle_mm.setCurrentIndex(self.nozzle_mm.findData(data.get("nozzle_mm", 0.4)))
             self.min_feature_mm.setValue(data.get("min_feature_mm", 0.45))
@@ -514,6 +545,7 @@ class MainWindow(QMainWindow):
             "color_delta": self.color_delta.value(), "cleanup": self.cleanup_toggle.currentIndex() == 0,
             "shape": self.shape.currentText(), "corner_radius_mm": self.corner_mm.value(),
             "polygon": self.polygon,
+            "protected_regions": self.protected_regions,
             "hole_enabled": self.hole_toggle.currentIndex() == 0,
             "hole_diameter_mm": self.hole_mm.value(),
         }

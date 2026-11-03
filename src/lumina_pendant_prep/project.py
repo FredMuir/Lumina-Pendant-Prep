@@ -73,6 +73,13 @@ def load_project(path: str | Path) -> dict[str, Any]:
         raise ValueError("Invalid hole position")
     if "polygon" in data and not (isinstance(data["polygon"], list) and all(point(p) for p in data["polygon"])):
         raise ValueError("Invalid polygon")
+    if "protected_regions" in data:
+        regions = data["protected_regions"]
+        if not (isinstance(regions, list) and len(regions) <= 100 and all(
+                isinstance(r, (list, tuple)) and len(r) == 4
+                and all(number(v, 0, 1) for v in r) and r[0] < r[2] and r[1] < r[3]
+                for r in regions)):
+            raise ValueError("Invalid protected regions")
     for key, low, high in (("target_width_mm", 1, 300), ("nozzle_mm", 0.1, 2),
                            ("min_feature_mm", 0, 5), ("color_delta", 0, 40),
                            ("corner_radius_mm", 0, 30), ("hole_diameter_mm", 0.5, 30)):

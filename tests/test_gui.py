@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPoint
 from PySide6.QtTest import QTest
 
 from lumina_pendant_prep.app import MainWindow, PreviewJob
@@ -77,6 +77,53 @@ class GuiSmokeTests(unittest.TestCase):
             destination = window.write_png(window.output, str(Path(directory) / "result.png"))
             with Image.open(destination) as png:
                 self.assertEqual(png.convert("RGBA").tobytes(), baseline)
+            window.close()
+
+    def test_real_photo_protected_region_is_preserved_and_project_restored(self):
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "photo.png"
+            with Image.open(photo) as original:
+                original.resize((320, 180), Image.Resampling.LANCZOS).save(path)
+            window = MainWindow()
+            window.shape.setCurrentText("矩形")
+            window.hole_toggle.setCurrentIndex(1)
+            window.open_image(str(path))
+            window.show()
+            self.app.processEvents()
+            window.crop_tool.setCurrentText("拖动添加保护区域")
+            rect = window.input_canvas._image_rect()
+            start = QPoint(round(rect.x() + rect.width() * 0.25), round(rect.y() + rect.height() * 0.25))
+            end = QPoint(round(rect.x() + rect.width() * 0.75), round(rect.y() + rect.height() * 0.75))
+            QTest.mousePress(window.input_canvas, Qt.MouseButton.LeftButton, pos=start)
+            QTest.mouseMove(window.input_canvas, end)
+            QTest.mouseRelease(window.input_canvas, Qt.MouseButton.LeftButton, pos=end)
+            self.assertEqual(len(window.protected_regions), 1)
+            region = window.protected_regions[0]
+            deadline = time.monotonic() + 20
+            while window.output_generation != window.generation and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.02)
+            self.assertEqual(window.output_generation, window.generation)
+            from lumina_pendant_prep.render import crop_pixel_box
+            box = crop_pixel_box(window.source.size, region)
+            self.assertEqual(window.output.crop(box).tobytes(), window.source.crop(box).tobytes())
+            self.assertNotEqual(window.output.crop((0, 0, 80, 45)).tobytes(),
+                                window.source.crop((0, 0, 80, 45)).tobytes())
+            self.assertIsNone(window.preview_merged.crop(box).getbbox())
+            self.assertIsNone(window.preview_quantized.crop(box).getbbox())
+            project = root / "project.lpproj"
+            save_project(project, window._project_data())
+            window._clear_protection()
+            self.assertEqual(window.protected_regions, [])
+            window.undo()
+            self.assertEqual(window.protected_regions, [region])
+            window._clear_protection()
+            with patch("lumina_pendant_prep.app.QFileDialog.getOpenFileName", return_value=(str(project), "")):
+                window.load_project_dialog()
+            self.assertEqual(window.protected_regions, [region])
+            self.assertEqual(window.input_canvas.protected_regions, [region])
             window.close()
 
     def test_heic_preview_exports_fully_transparent_hole(self):

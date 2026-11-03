@@ -17,6 +17,7 @@ class ImageCanvas(QWidget):
     cropChanged = Signal(object)
     holeMoved = Signal(float, float)
     polygonChanged = Signal(object)
+    protectionAdded = Signal(object)
     outlineFinished = Signal()
 
     def __init__(self, interactive: bool = False, parent=None):
@@ -30,6 +31,7 @@ class ImageCanvas(QWidget):
         self.hole = (0.5, 0.12)
         self.hole_fraction = 0.07
         self.polygon: list[tuple[float, float]] = []
+        self.protected_regions: list[tuple[float, float, float, float]] = []
         self.drawing_outline = False
         self.drag_start: QPointF | None = None
         self.drag_end: QPointF | None = None
@@ -49,7 +51,11 @@ class ImageCanvas(QWidget):
         self.mode = mode
         if mode == "outline":
             self.drawing_outline = False
-        self.setCursor(Qt.CursorShape.CrossCursor if mode in ("crop", "outline") else Qt.CursorShape.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.CrossCursor if mode in ("crop", "outline", "protect") else Qt.CursorShape.PointingHandCursor)
+
+    def set_protected_regions(self, regions) -> None:
+        self.protected_regions = list(regions)
+        self.update()
 
     def _image_rect(self) -> QRectF:
         if self.image is None or self.image.width() == 0:
@@ -92,6 +98,11 @@ class ImageCanvas(QWidget):
         painter.drawImage(rect, self.image)
         painter.setPen(QPen(QColor("#34d399"), 2, Qt.PenStyle.DashLine))
         painter.drawRect(crop_rect)
+        painter.setPen(QPen(QColor("#f472b6"), 2, Qt.PenStyle.DashLine))
+        painter.setBrush(QColor(244, 114, 182, 45))
+        for left, top, right, bottom in self.protected_regions:
+            painter.drawRect(QRectF(rect.x() + left * rect.width(), rect.y() + top * rect.height(),
+                                    (right - left) * rect.width(), (bottom - top) * rect.height()))
         cx = rect.x() + self.hole[0] * rect.width()
         cy = rect.y() + self.hole[1] * rect.height()
         hole_r = max(3, self.hole_fraction * rect.width() / 2)
@@ -152,6 +163,9 @@ class ImageCanvas(QWidget):
         if p0 and p1 and abs(p1[0] - p0[0]) > 0.02 and abs(p1[1] - p0[1]) > 0.02:
             left, right = sorted((p0[0], p1[0]))
             top, bottom = sorted((p0[1], p1[1]))
-            self.cropChanged.emit((left, top, right, bottom))
+            if self.mode == "protect":
+                self.protectionAdded.emit((left, top, right, bottom))
+            else:
+                self.cropChanged.emit((left, top, right, bottom))
         self.update()
 
