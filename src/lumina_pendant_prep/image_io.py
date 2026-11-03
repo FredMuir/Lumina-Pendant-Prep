@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from io import BytesIO
 
 from PIL import Image, ImageCms, ImageOps
 
@@ -29,9 +30,10 @@ def open_rgba(path: str | Path) -> Image.Image:
         icc = image.info.get("icc_profile")
         if icc:
             try:
-                source_profile = ImageCms.ImageCmsProfile(bytes(icc))
+                source_profile = ImageCms.ImageCmsProfile(BytesIO(icc))
                 target_profile = ImageCms.createProfile("sRGB")
-                alpha = image.getchannel("A") if "A" in image.getbands() else None
+                has_alpha = "A" in image.getbands() or "transparency" in image.info
+                alpha = image.convert("RGBA").getchannel("A") if has_alpha else None
                 base = image.convert("RGB") if alpha is not None or image.mode == "P" else image
                 rgb = ImageCms.profileToProfile(
                     base, source_profile, target_profile, outputMode="RGB"

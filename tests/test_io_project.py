@@ -2,13 +2,25 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageCms
 
 from lumina_pendant_prep.image_io import open_rgba
 from lumina_pendant_prep.project import load_project, save_project
 
 
 class ImageAndProjectTests(unittest.TestCase):
+    def test_icc_palette_png_preserves_transparency(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "palette.png"
+            image = Image.new("P", (2, 1))
+            image.putpalette([255, 0, 0, 0, 0, 255] + [0] * 762)
+            image.putdata([0, 1])
+            profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+            image.save(path, transparency=0, icc_profile=profile)
+            loaded = open_rgba(path)
+            self.assertEqual(loaded.getpixel((0, 0))[3], 0)
+            self.assertEqual(loaded.getpixel((1, 0))[3], 255)
+
     def test_png_load_and_exif_orientation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "rotated.png"
