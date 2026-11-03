@@ -114,4 +114,4 @@ python -m unittest discover -s tests -v
 
 ## 参考资料
 
-详细决策与后续修订记录见 [`docs/PLAN.md`](docs/PLAN.md)；实拍照片来源、测试矩阵与打印验收见 [`docs/PHOTO_VALIDATION.md`](docs/PHOTO_VALIDATION.md)。
+Windows 首发目标与验收见 [`docs/GOALS.md`](docs/GOALS.md)；详细技术决策见 [`docs/PLAN.md`](docs/PLAN.md)；实拍照片来源、测试矩阵与打印验收见 [`docs/PHOTO_VALIDATION.md`](docs/PHOTO_VALIDATION.md)。
