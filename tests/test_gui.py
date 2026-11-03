@@ -3,6 +3,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -31,6 +32,16 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertEqual(window.output.mode, "RGBA")
             self.assertEqual(window.output_canvas.image.width(), 80)
             self.assertTrue(window._settings()[1].hole_enabled)
+
+            # A setting change must not export the previous preview while the
+            # replacement preview is still queued or running.
+            window.width_mm.setValue(61)
+            with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName") as dialog, \
+                 patch("lumina_pendant_prep.app.QMessageBox.information") as notice:
+                window.export_png()
+                dialog.assert_not_called()
+                notice.assert_called_once()
+            window.width_mm.setValue(60)
 
             # Exercise the same writer used by the export dialog and verify the
             # transparency and physical-size metadata survive a real PNG roundtrip.

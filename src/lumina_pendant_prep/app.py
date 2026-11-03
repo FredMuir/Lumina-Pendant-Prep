@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
         self.preview_changed: Image.Image | None = None
         self.hole_safe = False
         self.generation = 0
+        self.output_generation = -1
         self.preview_running = False
         self.active_job: PreviewJob | None = None
         self.undo_stack: list[dict] = []
@@ -314,6 +315,7 @@ class MainWindow(QMainWindow):
             self.timer.start(0)
             return
         self.prepared, self.output = prepared, output
+        self.output_generation = generation
         self.preview_changed = result.changed_mask if result else None
         self._refresh_output_canvas()
         if result:
@@ -416,6 +418,9 @@ class MainWindow(QMainWindow):
     def export_png(self):
         if self.output is None:
             QMessageBox.information(self, "尚无图像", "请先打开一张照片并等待预览完成。")
+            return
+        if self.output_generation != self.generation:
+            QMessageBox.information(self, "预览尚未更新", "请等待当前设置的预览完成后再导出。")
             return
         default = (self.source_path.stem if self.source_path else "pendant") + "-pendant.png"
         filename, _ = QFileDialog.getSaveFileName(self, "导出透明 PNG", default, "PNG 图像 (*.png)")
