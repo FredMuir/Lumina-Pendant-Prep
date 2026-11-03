@@ -68,9 +68,9 @@ python -m unittest discover -s tests -v
 - Pillow：常见格式解码、EXIF 方向、RGBA/PNG、裁切、遮罩与圆角。
 - pillow-heif：HEIC/HEIF 解码并注册为 Pillow 插件；对应用安装包做真实照片兼容验证。
 - NumPy + OpenCV：颜色标签、连通域、小色岛筛选、距离/边缘约束等计算。通过独立处理模块隔离算法，GUI 不直接操作像素循环。
-- PyInstaller 或 Nuitka：分别在 Windows 与 macOS 构建和签名/打包；本地依赖、HEIF codec 和安装包大小需在技术验证阶段确认。
+- PyInstaller：先验证 Windows 构建与分发；macOS 打包在 Windows 验收完成后再启动。本地依赖、HEIF codec 和安装包大小需在技术验证阶段确认。
 
-最终选型需先做最小技术验证，特别检查 HEIC 在 Windows/macOS 打包后的解码表现、Apple Silicon 支持、色彩配置、运行速度和分发许可。
+先检查 Windows 打包后的 HEIC 解码表现、色彩配置、运行速度和分发许可；macOS 和 Apple Silicon 的验证放在后续阶段。
 
 ## 交互流程草案
 
@@ -84,10 +84,10 @@ python -m unittest discover -s tests -v
 
 ## 实施阶段
 
-1. **技术验证**：PySide6 跨平台窗口、HEIC/HEIF 解码、RGBA PNG 导出与安装包依赖验证。
-2. **图像核心**：方向/色彩处理、毫米到像素换算、基于感知色差和连通域的小色块合并；用合成图像和实际打印照片建立案例。
+1. **技术验证**：Windows PySide6 窗口、HEIC/HEIF 解码、RGBA PNG 导出与安装包依赖验证。
+2. **图像核心**：方向/色彩处理、毫米到像素换算、基于感知色差和连通域的小色块合并；使用实拍照片验证照片效果，几何边界可用程序构造的图形进行单元测试。
 3. **桌面 MVP**：导入、对比预览、参数控制、撤销/重做、圆/圆角矩形/多边形裁切、透明孔、PNG 导出。
-4. **可用性与分发**：项目设置保存、边缘情况提示、Windows/macOS 安装包与用户文档。
+4. **可用性与分发**：项目设置保存、边缘情况提示、Windows 分发包与用户文档；Windows 验收后再做 macOS。
 5. **打印验证迭代**：用不同尺寸、喷嘴、材料配色的实物打印检查边界；据此调整默认阈值。
 
 ## 开源复用与参考
@@ -114,4 +114,4 @@ python -m unittest discover -s tests -v
 
 ## 参考资料
 
-详细决策、界面草图和后续修订记录见 [`docs/PLAN.md`](docs/PLAN.md)。
+详细决策与后续修订记录见 [`docs/PLAN.md`](docs/PLAN.md)；实拍照片来源、测试矩阵与打印验收见 [`docs/PHOTO_VALIDATION.md`](docs/PHOTO_VALIDATION.md)。
