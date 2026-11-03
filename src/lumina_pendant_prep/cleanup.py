@@ -2,10 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from typing import Callable
 
 import cv2
 import numpy as np
 from PIL import Image
+
+
+class ProcessingCancelled(Exception):
+    """Raised when an obsolete preview is cancelled by the caller."""
+
+
+def _check_cancel(cancelled: Callable[[], bool] | None) -> None:
+    if cancelled is not None and cancelled():
+        raise ProcessingCancelled()
 
 
 @dataclass(frozen=True)
@@ -49,7 +59,8 @@ def _lab_distances(labs: dict[int, np.ndarray]) -> np.ndarray:
 
 def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
                             labs: dict[int, np.ndarray], threshold: float,
-                            distances: np.ndarray | None = None) -> None:
+                            distances: np.ndarray | None = None,
+                            cancelled: Callable[[], bool] | None = None) -> None:
     """Merge touching components, never all occurrences of a palette color."""
     if threshold <= 0 or not labs:
         return
@@ -59,6 +70,7 @@ def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
     region_colors = [0]
     region_sizes = [0]
     for color in sorted(labs):
+        _check_cancel(cancelled)
         mask = ((labels == color) & visible).astype(np.uint8)
         count, components, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
         offset = len(region_colors) - 1
@@ -71,6 +83,7 @@ def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
     parent = list(range(count))
     edges = []
     for a, b in ((regions[:, :-1], regions[:, 1:]), (regions[:-1, :], regions[1:, :])):
+        _check_cancel(cancelled)
         touching = (a != b) & (a != 0) & (b != 0)
         lo = np.minimum(a[touching], b[touching]).astype(np.uint64)
         hi = np.maximum(a[touching], b[touching]).astype(np.uint64)
@@ -87,7 +100,9 @@ def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
 
     # Prefer longer shared boundaries. The representative color is that of
     # the larger accumulated region; ties use component id for determinism.
-    for left, right, _ in sorted(edges, key=lambda edge: (-edge[2], edge[0], edge[1])):
+    for index, (left, right, _) in enumerate(sorted(edges, key=lambda edge: (-edge[2], edge[0], edge[1]))):
+        if index % 1024 == 0:
+            _check_cancel(cancelled)
         left, right = root(left), root(right)
         if left == right:
             continue
@@ -100,16 +115,20 @@ def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
 
     region_remap = np.zeros(count, dtype=np.uint8)
     for region in range(1, count):
+        if region % 1024 == 0:
+            _check_cancel(cancelled)
         region_remap[region] = region_colors[root(region)]
     labels[visible] = region_remap[regions[visible]]
 
 
-def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResult:
+def simplify_image(image: Image.Image, settings: CleanupSettings,
+                   cancelled: Callable[[], bool] | None = None) -> CleanupResult:
     """Quantize without dithering, merge adjacent similar colors, then absorb tiny islands."""
     if not 2 <= settings.colors <= 256:
         raise ValueError("Color count must be between 2 and 256")
     if settings.target_width_mm <= 0 or settings.min_feature_mm < 0:
         raise ValueError("Print width must be positive and feature width non-negative")
+    _check_cancel(cancelled)
     rgba = image.convert("RGBA")
     alpha = np.asarray(rgba.getchannel("A"), dtype=np.uint8)
     opaque = alpha > 0
@@ -129,13 +148,14 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
                                  dither=Image.Dither.NONE)
         labels = np.asarray(quantized, dtype=np.uint8).copy()
     used = set(int(value) for value in np.unique(labels[opaque])) if np.any(opaque) else set()
+    _check_cancel(cancelled)
     original_colors = len(used)
     palette = quantized.getpalette() or []
     labs = _lab_palette(palette, used) if used else {}
     distances = _lab_distances(labs)
     initial_labels = labels.copy()
 
-    _merge_adjacent_regions(labels, opaque, labs, settings.color_delta, distances)
+    _merge_adjacent_regions(labels, opaque, labs, settings.color_delta, distances, cancelled)
 
     width, height = image.size
     minimum_feature_px = max(1, math.ceil(width / settings.target_width_mm * settings.min_feature_mm))
@@ -147,9 +167,12 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
         # exchange colors simultaneously and remain fragmented.
         kernel = np.asarray([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
         for color in sorted(int(v) for v in np.unique(labels[opaque])):
+            _check_cancel(cancelled)
             mask = ((labels == color) & opaque).astype(np.uint8)
             count, components, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
             for component_id in range(1, count):
+                if component_id % 256 == 1:
+                    _check_cancel(cancelled)
                 area = int(stats[component_id, cv2.CC_STAT_AREA])
                 x = int(stats[component_id, cv2.CC_STAT_LEFT])
                 y = int(stats[component_id, cv2.CC_STAT_TOP])
@@ -191,6 +214,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
 
     output_rgb = np.zeros((height, width, 3), dtype=np.uint8)
     for color in np.unique(labels[opaque]):
+        _check_cancel(cancelled)
         color = int(color)
         output_rgb[(labels == color) & opaque] = palette[color * 3:color * 3 + 3]
     output = Image.fromarray(np.dstack((output_rgb, alpha)), "RGBA")
@@ -200,6 +224,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
     original_rgb = rgb_pixels.astype(np.int16)
     changed = np.any(np.abs(output_rgb.astype(np.int16) - original_rgb) > 0, axis=2) & opaque
     changed_mask = Image.fromarray(changed.astype(np.uint8) * 255, "L")
+    _check_cancel(cancelled)
     return CleanupResult(
         image=output,
         changed_mask=changed_mask,

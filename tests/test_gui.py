@@ -79,6 +79,26 @@ class GuiSmokeTests(unittest.TestCase):
                 self.assertEqual(png.convert("RGBA").tobytes(), baseline)
             window.close()
 
+    def test_new_setting_cancels_obsolete_real_photo_preview(self):
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        window = MainWindow()
+        self.assertTrue(window.open_image(str(photo)))
+        window.timer.stop()
+        window._start_preview()
+        old_job = window.active_job
+        cancelled = []
+        old_job.signals.cancelled.connect(cancelled.append)
+        window.cleanup_toggle.setCurrentText("保留原色")
+        self.assertTrue(old_job.cancel_requested.is_set())
+        deadline = time.monotonic() + 30
+        while window.output_generation != window.generation and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.02)
+        self.assertEqual(window.output_generation, window.generation)
+        self.assertIn("保留原始颜色", window.status.text())
+        self.assertEqual(cancelled, [old_job.generation])
+        window.close()
+
     def test_real_photo_protected_region_is_preserved_and_project_restored(self):
         photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
         with tempfile.TemporaryDirectory() as directory:

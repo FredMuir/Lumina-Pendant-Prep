@@ -4,6 +4,7 @@ import sys
 import os
 import tempfile
 import time
+from threading import Event
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from .canvas import ImageCanvas
-from .cleanup import CleanupSettings, simplify_image
+from .cleanup import CleanupSettings, ProcessingCancelled, simplify_image
 from .image_io import open_rgba
 from .project import load_project, save_project, source_path_for_project, resolve_project_source
 from .render import (PendantSettings, crop_pixel_box, hole_has_clearance, hole_has_opaque_surrounding,
@@ -27,6 +28,7 @@ from .render import (PendantSettings, crop_pixel_box, hole_has_clearance, hole_h
 class PreviewSignals(QObject):
     finished = Signal(int, object, object, object)
     failed = Signal(int, str)
+    cancelled = Signal(int)
 
 
 class PreviewJob(QRunnable):
@@ -40,14 +42,24 @@ class PreviewJob(QRunnable):
         self.enabled = enabled
         self.protected_regions = tuple(tuple(region) for region in protected_regions)
         self.signals = PreviewSignals()
+        self.cancel_requested = Event()
+
+    def cancel(self):
+        self.cancel_requested.set()
+
+    def _check_cancel(self):
+        if self.cancel_requested.is_set():
+            raise ProcessingCancelled()
 
     def run(self):
         try:
+            self._check_cancel()
             if self.enabled:
                 # Analyze only pixels that survive the pendant outline. Restore
                 # the original alpha before final rendering to avoid applying
                 # antialiased outline transparency twice.
                 outline = make_pendant(self.image, replace(self.pendant, hole_enabled=False))
+                self._check_cancel()
                 x0, y0, x1, y1 = crop_pixel_box(self.image.size, self.pendant.crop)
                 if self.pendant.shape == "Circle":
                     side = min(x1 - x0, y1 - y0)
@@ -64,15 +76,19 @@ class PreviewJob(QRunnable):
                 analysis_image = self.image.convert("RGBA")
                 original_alpha = analysis_image.getchannel("A")
                 analysis_image.putalpha(selection)
-                result = simplify_image(analysis_image, self.cleanup)
+                result = simplify_image(analysis_image, self.cleanup, self.cancel_requested.is_set)
                 prepared = result.image
                 prepared.paste(self.image.convert("RGBA"), mask=protection)
                 prepared.putalpha(original_alpha)
             else:
                 result = None
                 prepared = self.image
+            self._check_cancel()
             output = make_pendant(prepared, self.pendant)
+            self._check_cancel()
             self.signals.finished.emit(self.generation, prepared, output, result)
+        except ProcessingCancelled:
+            self.signals.cancelled.emit(self.generation)
         except Exception as exc:
             self.signals.failed.emit(self.generation, str(exc))
 
@@ -361,6 +377,8 @@ class MainWindow(QMainWindow):
             self._record_history()
             self._sync_geometry()
             self.generation += 1
+            if self.active_job is not None:
+                self.active_job.cancel()
             self.timer.start()
 
     def _start_preview(self):
@@ -380,6 +398,7 @@ class MainWindow(QMainWindow):
         self.active_job = job
         job.signals.finished.connect(self._preview_ready)
         job.signals.failed.connect(self._preview_failed)
+        job.signals.cancelled.connect(self._preview_cancelled)
         self.preview_running = True
         self.pool.start(job)
         self.status.setText("正在生成预览…")
@@ -418,6 +437,18 @@ class MainWindow(QMainWindow):
             self.timer.start(0)
         else:
             self.status.setText(f"预览失败：{message}")
+
+    def _preview_cancelled(self, generation):
+        self.preview_running = False
+        self.active_job = None
+        if self.source is not None and generation != self.generation:
+            self.timer.start(0)
+
+    def closeEvent(self, event):
+        self.timer.stop()
+        if self.active_job is not None:
+            self.active_job.cancel()
+        super().closeEvent(event)
 
     def _update_status(self, *_):
         if self.source is None:
