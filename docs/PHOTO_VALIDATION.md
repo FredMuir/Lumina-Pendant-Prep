@@ -2,6 +2,18 @@
 
 本方案用于指导 Windows 首发验证。已用一张来源清晰的实拍 JPEG 验证保留原色、项目重开和 PNG 导出的基础行为（见 [样本记录](../tests/fixtures/README.md)）；本方案所需的完整实拍照片测试、Lumina 全流程对照和实物打印尚未完成。已有的程序构造图像测试只能证明特定代码行为，不能证明照片效果。照片测试只采用真实相机拍摄的照片，不采用 AI 生成或程序绘制的照片。简单的几何图形仍可用于验证透明蒙版、坐标和异常边界，且不能冒充照片测试结果。
 
+### 原生 HEIC 本机记录
+
+已使用 [libheif 问题 #1190](https://github.com/strukturag/libheif/issues/1190) 中公开的 iPhone 15 Pro / iOS 18 原生照片进行一次本机 Windows 验证，文件 SHA-256 为 `4b887e6bc345191cbb9836602373b3ec454558ccc62d3518041e085117238fe0`；[样本信息](https://managingwp.github.io/heic-ios18-fix/samples/)列出了设备、校验值和来源。由于照片自身再分发授权尚不明确，原件仅放在本机忽略目录，不纳入本仓库。源代码运行的 GUI 以保留原色模式成功打开、预览并导出 3024 × 4032 RGBA PNG，孔心和外部角点 alpha 为 0。该样本不能证明 HDR 色彩准确、其他手机兼容、最新打包程序的解码能力或打印效果。
+
+取得相同原件后可在 Windows PowerShell 中运行可选回归测试（文件校验值必须匹配）：
+
+```powershell
+$env:LPP_REAL_HEIC = 'C:\path\to\original.HEIC'
+$env:QT_QPA_PLATFORM = 'offscreen'
+python -m unittest discover -s tests -p test_real_heic_optional.py -v
+```
+
 ## 样本与来源
 
 建立至少 12 张互不重复的实拍照片，覆盖人像、宠物、风景、花卉或小物件；至少各 2 张包含细毛发、眼睛或五官、小文字或细线、渐变背景、阴影或低光噪声等难点。记录横竖构图和不同分辨率，并检查 EXIF 旋转与嵌入色彩配置。涉及人像须具备展示和使用授权；不确定来源或使用范围的图片不加入公开仓库。
