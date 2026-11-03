@@ -95,6 +95,28 @@ def hole_has_clearance(image_size: tuple[int, int], settings: PendantSettings,
     return available >= required_margin
 
 
+def hole_has_opaque_surrounding(image: Image.Image, settings: PendantSettings,
+                                minimum_wall_mm: float = 1.2) -> bool:
+    """Check that source transparency does not interrupt the hole or its wall."""
+    width, height = image.size
+    left, top, right, bottom = settings.crop
+    x0 = max(0, min(width - 1, round(left * width)))
+    y0 = max(0, min(height - 1, round(top * height)))
+    x1 = max(x0 + 1, min(width, round(right * width)))
+    y1 = max(y0 + 1, min(height, round(bottom * height)))
+    scale = pendant_pixel_width(image.size, settings.crop, settings.shape) / settings.target_width_mm
+    cx = x0 + settings.hole_x * (x1 - x0)
+    cy = y0 + settings.hole_y * (y1 - y0)
+    radius = max(1, round(settings.hole_diameter_mm * scale / 2)) + 1 + minimum_wall_mm * scale
+    bounds = (max(0, math.floor(cx - radius)), max(0, math.floor(cy - radius)),
+              min(width, math.ceil(cx + radius) + 1), min(height, math.ceil(cy + radius) + 1))
+    alpha = image.crop(bounds).convert("RGBA").getchannel("A")
+    disk = Image.new("L", alpha.size, 0)
+    ImageDraw.Draw(disk).ellipse((cx - radius - bounds[0], cy - radius - bounds[1],
+                                cx + radius - bounds[0], cy + radius - bounds[1]), fill=255)
+    return ImageChops.multiply(ImageChops.invert(alpha), disk).getbbox() is None
+
+
 def make_pendant(image: Image.Image, settings: PendantSettings) -> Image.Image:
     width, height = image.size
     left, top, right, bottom = settings.crop

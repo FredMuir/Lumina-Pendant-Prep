@@ -17,7 +17,8 @@ from .canvas import ImageCanvas
 from .cleanup import CleanupSettings, simplify_image
 from .image_io import open_rgba
 from .project import load_project, save_project
-from .render import PendantSettings, hole_has_clearance, make_pendant, pendant_pixel_width
+from .render import (PendantSettings, hole_has_clearance, hole_has_opaque_surrounding,
+                     make_pendant, pendant_pixel_width)
 
 
 class PreviewSignals(QObject):
@@ -283,9 +284,10 @@ class MainWindow(QMainWindow):
             hole_enabled=False, hole_x=hx, hole_y=hy,
             hole_diameter_mm=self.hole_mm.value(), polygon=tuple(self.polygon),
         )
-        self.hole_safe = requested_hole and hole_in_crop and hole_has_clearance(
-            self.source.size, pendant, minimum_wall_mm=max(1.2, self.nozzle_mm.value() * 2)
-        )
+        wall_mm = max(1.2, self.nozzle_mm.value() * 2)
+        self.hole_safe = (requested_hole and hole_in_crop
+                          and hole_has_clearance(self.source.size, pendant, wall_mm)
+                          and hole_has_opaque_surrounding(self.source, pendant, wall_mm))
         pendant = replace(pendant, hole_enabled=self.hole_safe)
         return cleanup, pendant
 
@@ -322,7 +324,7 @@ class MainWindow(QMainWindow):
         self.preview_changed = result.changed_mask if result else None
         self._refresh_output_canvas()
         if result:
-            hole_note = " · 孔位太靠近轮廓，无法留出材料边距；当前不会裁孔" if self.hole_toggle.currentIndex() == 0 and not self.hole_safe else ""
+            hole_note = " · 孔附近的轮廓或透明区域无法留出材料边距；当前不会裁孔" if self.hole_toggle.currentIndex() == 0 and not self.hole_safe else ""
             self.status.setText(
                 f"预览就绪 · 调色 {result.original_colors} → {result.resulting_colors} 色 · "
                 f"合并 {result.merged_islands} 个小色岛 · 最小特征约 {result.minimum_feature_px}px "
@@ -330,7 +332,7 @@ class MainWindow(QMainWindow):
                 f"孔和背景均导出为透明像素。{hole_note}"
             )
         else:
-            hole_note = " · 孔位太靠近轮廓，无法留出材料边距；当前不会裁孔" if self.hole_toggle.currentIndex() == 0 and not self.hole_safe else ""
+            hole_note = " · 孔附近的轮廓或透明区域无法留出材料边距；当前不会裁孔" if self.hole_toggle.currentIndex() == 0 and not self.hole_safe else ""
             self.status.setText(f"预览就绪 · 保留原始颜色 · 孔和背景均导出为透明像素。{hole_note}")
         self._update_status()
 

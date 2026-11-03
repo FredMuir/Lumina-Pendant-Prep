@@ -3,10 +3,19 @@ import unittest
 import numpy as np
 from PIL import Image
 
-from lumina_pendant_prep.render import PendantSettings, hole_has_clearance, make_pendant
+from lumina_pendant_prep.render import PendantSettings, hole_has_clearance, hole_has_opaque_surrounding, make_pendant
 
 
 class PendantRenderTests(unittest.TestCase):
+    def test_transparent_source_near_hole_fails_wall_check(self):
+        image = Image.new("RGBA", (100, 100), (255, 0, 0, 255))
+        settings = PendantSettings(crop=(0, 0, 1, 1), shape="Rectangle",
+                                   target_width_mm=100, hole_x=0.5, hole_y=0.5,
+                                   hole_diameter_mm=4)
+        self.assertTrue(hole_has_opaque_surrounding(image, settings))
+        image.putpixel((54, 50), (0, 0, 0, 0))
+        self.assertFalse(hole_has_opaque_surrounding(image, settings))
+
     def setUp(self):
         self.image = Image.new("RGBA", (100, 80), (220, 40, 30, 255))
 
