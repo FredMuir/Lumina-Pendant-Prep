@@ -218,6 +218,25 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertEqual(window._project_data()["nozzle_mm"], 0.6)
             window.close()
 
+    def test_gentle_preset_is_undoable_and_uses_selected_nozzle(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        window = MainWindow()
+        window.nozzle_mm.setCurrentIndex(2)
+        window.cleanup_toggle.setCurrentText("保留原色")
+        self.assertTrue(window.open_image(str(photo)))
+        window._apply_gentle_preset()
+        self.assertEqual(window.colors.value(), 96)
+        self.assertEqual(window.color_delta.value(), 2)
+        self.assertAlmostEqual(window.min_feature_mm.value(), 0.6)
+        self.assertEqual(window.cleanup_toggle.currentText(), "净化色块")
+        self.assertTrue(window.colors.isEnabled())
+        window.undo()
+        self.assertEqual(window.colors.value(), 32)
+        self.assertEqual(window.color_delta.value(), 8)
+        self.assertAlmostEqual(window.min_feature_mm.value(), 0.45)
+        self.assertEqual(window.cleanup_toggle.currentText(), "保留原色")
+        window.close()
+
     def test_incomplete_polygon_cannot_export_rectangle(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sample.png"

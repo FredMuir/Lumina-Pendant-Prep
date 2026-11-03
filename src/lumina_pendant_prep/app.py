@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Qt, Signal
+from PySide6.QtCore import QObject, QRunnable, QSignalBlocker, QThreadPool, QTimer, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
@@ -166,6 +166,10 @@ class MainWindow(QMainWindow):
         form.addRow("颜色上限", self.colors)
         form.addRow("相近色阈值", self.color_delta)
         form.addRow("处理模式", self.cleanup_toggle)
+        gentle_preset = QPushButton("温和预设（试用）")
+        gentle_preset.setToolTip("启用净化，颜色上限 96，相近色阈值 2，最小特征宽度设为当前喷嘴直径；效果需通过预览和打印确认。")
+        gentle_preset.clicked.connect(self._apply_gentle_preset)
+        form.addRow(gentle_preset)
         control_layout.addWidget(print_group)
 
         shape_group = QGroupBox("挂坠裁切")
@@ -243,6 +247,17 @@ class MainWindow(QMainWindow):
         enabled = self.cleanup_toggle.currentIndex() == 0
         self.colors.setEnabled(enabled)
         self.color_delta.setEnabled(enabled)
+
+    def _apply_gentle_preset(self):
+        widgets = (self.colors, self.color_delta, self.min_feature_mm, self.cleanup_toggle)
+        blockers = [QSignalBlocker(widget) for widget in widgets]
+        self.colors.setValue(96)
+        self.color_delta.setValue(2)
+        self.min_feature_mm.setValue(self.nozzle_mm.currentData())
+        self.cleanup_toggle.setCurrentIndex(0)
+        del blockers
+        self._update_cleanup_controls()
+        self._schedule_preview()
 
     @staticmethod
     def _double(value: float, minimum: float, maximum: float, step: float) -> QDoubleSpinBox:
