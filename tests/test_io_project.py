@@ -24,7 +24,7 @@ class ImageAndProjectTests(unittest.TestCase):
             shutil.move(str(original), str(moved))
             moved_project = moved / project.name
             source = resolve_project_source(moved_project, load_project(moved_project)["source_path"])
-            self.assertEqual(Path(source), moved / photo.name)
+            self.assertTrue(Path(source).samefile(moved / photo.name))
             self.assertEqual(open_rgba(source).size, (4, 4))
 
     def test_icc_palette_png_preserves_transparency(self):
