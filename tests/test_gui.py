@@ -23,6 +23,31 @@ class GuiSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_small_window_can_scroll_to_status_with_real_photo(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        window = MainWindow()
+        window.resize(1000, 500)
+        window.cleanup_toggle.setCurrentText("保留原色")
+        window.show()
+        self.assertTrue(window.open_image(str(photo)))
+        deadline = time.monotonic() + 20
+        while window.output_generation != window.generation and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.02)
+        self.assertEqual(window.output_generation, window.generation)
+        self.app.processEvents()
+        self.assertLessEqual(window.height(), 500)
+        bar = window.controls_scroll.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 0)
+        bar.setValue(bar.maximum())
+        self.app.processEvents()
+        bar.setValue(bar.maximum())
+        self.app.processEvents()
+        pos = window.status.mapTo(window.controls_scroll.viewport(), QPoint(0, 0))
+        self.assertGreaterEqual(pos.y(), 0)
+        self.assertLessEqual(pos.y() + window.status.height(), window.controls_scroll.viewport().height())
+        window.close()
+
     def test_real_photo_preserve_color_project_and_png(self):
         photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
         with tempfile.TemporaryDirectory() as directory:

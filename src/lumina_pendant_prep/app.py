@@ -14,7 +14,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox, QCheckBox,
-    QSplitter, QVBoxLayout, QWidget,
+    QScrollArea, QSplitter, QVBoxLayout, QWidget,
 )
 
 from .canvas import ImageCanvas
@@ -203,7 +203,13 @@ class MainWindow(QMainWindow):
         self.status.setStyleSheet("color:#b8c2cc;padding:8px")
         control_layout.addWidget(self.status)
         control_layout.addStretch(1)
-        splitter.addWidget(controls)
+        self.controls_scroll = QScrollArea()
+        self.controls_scroll.setWidgetResizable(True)
+        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.controls_scroll.setMinimumWidth(290)
+        self.controls_scroll.setMaximumWidth(365)
+        self.controls_scroll.setWidget(controls)
+        splitter.addWidget(self.controls_scroll)
 
         previews = QWidget()
         preview_layout = QVBoxLayout(previews)
@@ -225,6 +231,7 @@ class MainWindow(QMainWindow):
         panes.addWidget(self.input_canvas); panes.addWidget(self.output_canvas)
         preview_layout.addWidget(panes, 1)
         self.source_info = QLabel("支持 JPEG、PNG、WebP、BMP、TIFF、HEIC/HEIF、AVIF")
+        self.source_info.setWordWrap(True)
         preview_layout.addWidget(self.source_info)
         splitter.addWidget(previews)
         splitter.setStretchFactor(1, 1)
