@@ -47,9 +47,19 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
     if np.any(opaque) and np.any(~opaque):
         rgb_pixels[~opaque] = np.median(rgb_pixels[opaque], axis=0).astype(np.uint8)
     rgb = Image.fromarray(rgb_pixels, "RGB")
-    quantized = rgb.quantize(colors=settings.colors, method=Image.Quantize.MEDIANCUT,
-                             dither=Image.Dither.NONE)
-    labels = np.asarray(quantized, dtype=np.uint8).copy()
+    if np.any(opaque) and np.any(~opaque):
+        # Transparent pixels must not consume palette entries or influence the
+        # frequency of visible colors. Train on visible pixels only.
+        visible = Image.fromarray(rgb_pixels[opaque].reshape(-1, 1, 3), "RGB")
+        trained = visible.quantize(colors=settings.colors, method=Image.Quantize.MEDIANCUT,
+                                   dither=Image.Dither.NONE)
+        quantized = trained
+        labels = np.zeros(alpha.shape, dtype=np.uint8)
+        labels[opaque] = np.asarray(trained, dtype=np.uint8).reshape(-1)
+    else:
+        quantized = rgb.quantize(colors=settings.colors, method=Image.Quantize.MEDIANCUT,
+                                 dither=Image.Dither.NONE)
+        labels = np.asarray(quantized, dtype=np.uint8).copy()
     used = set(int(value) for value in np.unique(labels[opaque])) if np.any(opaque) else set()
     original_colors = len(used)
     palette = quantized.getpalette() or []

@@ -7,6 +7,17 @@ from lumina_pendant_prep.cleanup import CleanupSettings, simplify_image
 
 
 class CleanupTests(unittest.TestCase):
+    def test_transparent_background_does_not_consume_palette_colors(self):
+        pixels = np.zeros((100, 100, 4), dtype=np.uint8)
+        pixels[10:20, 10:20] = (255, 0, 0, 255)
+        pixels[30:40, 30:40] = (0, 0, 255, 255)
+        result = simplify_image(Image.fromarray(pixels, "RGBA"), CleanupSettings(
+            colors=2, target_width_mm=100, min_feature_mm=0, color_delta=0,
+        ))
+        self.assertEqual(result.image.getpixel((15, 15)), (255, 0, 0, 255))
+        self.assertEqual(result.image.getpixel((35, 35)), (0, 0, 255, 255))
+        self.assertEqual(result.image.getpixel((0, 0))[3], 0)
+
     def test_adjacent_small_islands_do_not_swap_colors(self):
         source = Image.new("RGB", (2, 1))
         source.putdata([(230, 20, 30), (20, 40, 230)])
