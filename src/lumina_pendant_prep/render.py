@@ -151,7 +151,9 @@ def make_pendant(image: Image.Image, settings: PendantSettings) -> Image.Image:
         cy = round((settings.hole_y * source_h - offset_y) * supersample)
         draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=0)
     if supersample != 1:
-        mask = mask.resize((w, h), Image.Resampling.LANCZOS)
+        # Area averaging preserves fully empty pixels. Lanczos ringing can
+        # introduce faint nonzero alpha inside holes or outside the outline.
+        mask = mask.resize((w, h), Image.Resampling.BOX)
     cropped.putalpha(ImageChops.multiply(cropped.getchannel("A"), mask))
     dpi = 25.4 * w / settings.target_width_mm if settings.target_width_mm > 0 else 300
     cropped.info["dpi"] = (dpi, dpi)

@@ -7,6 +7,17 @@ from lumina_pendant_prep.render import PendantSettings, hole_has_clearance, hole
 
 
 class PendantRenderTests(unittest.TestCase):
+    def test_small_hole_and_outside_corner_are_fully_transparent(self):
+        image = Image.new("RGBA", (96, 64), (70, 130, 190, 255))
+        result = make_pendant(image, PendantSettings(
+            crop=(0, 0, 1, 1), shape="Rounded rectangle", target_width_mm=60,
+            corner_radius_mm=3, hole_enabled=True, hole_x=0.5, hole_y=0.12,
+            hole_diameter_mm=4,
+        ))
+        self.assertEqual(result.getpixel((48, 8))[3], 0)
+        self.assertEqual(result.getpixel((0, 0))[3], 0)
+        self.assertEqual(result.getpixel((48, 32))[3], 255)
+
     def test_transparent_source_near_hole_fails_wall_check(self):
         image = Image.new("RGBA", (100, 100), (255, 0, 0, 255))
         settings = PendantSettings(crop=(0, 0, 1, 1), shape="Rectangle",
