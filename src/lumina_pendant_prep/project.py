@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 
@@ -11,7 +13,20 @@ PROJECT_VERSION = 1
 
 def save_project(path: str | Path, data: dict[str, Any]) -> None:
     payload = {"format": "lumina-pendant-prep", "version": PROJECT_VERSION, **data}
-    Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)
+    destination = Path(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=destination.parent,
+                                         prefix=f".{destination.name}.", suffix=".tmp", delete=False) as file:
+            temporary = Path(file.name)
+            file.write(serialized)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def load_project(path: str | Path) -> dict[str, Any]:

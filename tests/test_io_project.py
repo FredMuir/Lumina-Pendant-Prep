@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageCms
 
@@ -63,6 +64,17 @@ class ImageAndProjectTests(unittest.TestCase):
             save_project(path, {"source_path": "photo.png", "crop": [0, 0, 0, 1]})
             with self.assertRaisesRegex(ValueError, "crop"):
                 load_project(path)
+
+    def test_failed_project_replace_preserves_previous_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "pendant.lpproj"
+            save_project(path, {"source_path": "original.png"})
+            with patch("lumina_pendant_prep.project.os.replace", side_effect=OSError("replace failed")):
+                with self.assertRaises(OSError):
+                    save_project(path, {"source_path": "new.png"})
+            self.assertEqual(load_project(path)["source_path"], "original.png")
+            self.assertEqual(list(root.iterdir()), [path])
 
 
 if __name__ == "__main__":
