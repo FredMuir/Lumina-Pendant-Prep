@@ -13,12 +13,35 @@ from PySide6.QtWidgets import QApplication
 from lumina_pendant_prep.app import MainWindow, PreviewJob
 from lumina_pendant_prep.cleanup import CleanupSettings
 from lumina_pendant_prep.render import PendantSettings
+from lumina_pendant_prep.project import save_project
 
 
 class GuiSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_project_relinks_moved_photo_and_preserves_current_image_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            photo = root / "moved.png"
+            Image.new("RGB", (40, 30), "red").save(photo)
+            project = root / "pendant.lpproj"
+            save_project(project, {"source_path": str(root / "missing.png"), "target_width_mm": 42})
+            window = MainWindow()
+            with patch("lumina_pendant_prep.app.QFileDialog.getOpenFileName",
+                       side_effect=[(str(project), ""), (str(photo), "")]), \
+                 patch("lumina_pendant_prep.app.QMessageBox.information"):
+                window.load_project_dialog()
+            self.assertEqual(window.source_path, photo)
+            self.assertEqual(window.width_mm.value(), 42)
+            bad = root / "bad.png"
+            bad.write_bytes(b"not an image")
+            with patch("lumina_pendant_prep.app.QMessageBox.critical"):
+                self.assertFalse(window.open_image(str(bad)))
+            self.assertEqual(window.source_path, photo)
+            self.assertEqual(window.width_mm.value(), 42)
+            window.close()
 
     def test_preview_palette_ignores_outside_crop_and_preserves_outline_alpha(self):
         outputs = []

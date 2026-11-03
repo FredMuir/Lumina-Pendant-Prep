@@ -236,7 +236,7 @@ class MainWindow(QMainWindow):
             image = open_rgba(filename)
         except Exception as exc:
             QMessageBox.critical(self, "无法打开图像", str(exc))
-            return
+            return False
         self.source, self.source_path = image, Path(filename)
         self.crop, self.hole = (0.0, 0.0, 1.0, 1.0), (0.5, 0.12)
         self.polygon = []
@@ -247,6 +247,7 @@ class MainWindow(QMainWindow):
         self.source_info.setText(f"{self.source_path.name}  ·  {image.width} × {image.height} px")
         self._update_enabled()
         self._schedule_preview()
+        return True
 
     def _set_crop(self, crop):
         self.crop = tuple(crop)
@@ -490,10 +491,16 @@ class MainWindow(QMainWindow):
             data = load_project(filename)
             source_path = data.get("source_path", "")
             if not source_path or not Path(source_path).exists():
-                raise FileNotFoundError(f"原始照片不存在：{source_path}\n请先找到项目使用的照片。")
+                QMessageBox.information(self, "原始照片已移动", f"找不到原始照片：{source_path}\n请选择该项目使用的照片。")
+                source_path, _ = QFileDialog.getOpenFileName(
+                    self, "重新定位原始照片", "", "图像 (*.jpg *.jpeg *.png *.webp *.bmp *.tif *.tiff *.heic *.heif *.avif)"
+                )
+                if not source_path:
+                    return
             self._loading_project = True
             try:
-                self.open_image(source_path)
+                if not self.open_image(source_path):
+                    return
                 self._apply_history(data)
             finally:
                 self._loading_project = False
