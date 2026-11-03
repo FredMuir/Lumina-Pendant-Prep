@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
-from lumina_pendant_prep.app import MainWindow
+from lumina_pendant_prep.app import MainWindow, PreviewJob
 from lumina_pendant_prep.cleanup import CleanupSettings, simplify_image
 
 
@@ -52,6 +52,33 @@ class RealHeicTests(unittest.TestCase):
             small = window.source.resize((300, 400), Image.Resampling.LANCZOS)
             result = simplify_image(small, CleanupSettings())
             self.assertEqual(result.image.size, small.size)
+            self.assertLessEqual(result.resulting_colors, 32)
+        finally:
+            window.close()
+
+    @unittest.skipUnless(os.environ.get("LPP_FULL_HEIC") == "1", "Set LPP_FULL_HEIC=1 for full-resolution cleanup")
+    def test_full_resolution_iphone_photo_cleanup_and_pendant(self):
+        source = Path(os.environ["LPP_REAL_HEIC"])
+        self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), SAMPLE_SHA256)
+        window = MainWindow()
+        try:
+            self.assertTrue(window.open_image(str(source)))
+            window.timer.stop()
+            settings, pendant = window._settings()
+            self.assertTrue(pendant.hole_enabled)
+            job = PreviewJob(1, window.source, settings, pendant, True)
+            results, failures = [], []
+            job.signals.finished.connect(lambda _gen, _prepared, output, result: results.append((output, result)))
+            job.signals.failed.connect(lambda _gen, message: failures.append(message))
+            job.run()
+            self.assertFalse(failures, failures)
+            self.assertEqual(len(results), 1)
+            output, result = results[0]
+            self.assertEqual(output.size, (3024, 4032))
+            self.assertEqual(output.getpixel((0, 0))[3], 0)
+            self.assertEqual(output.getpixel((1512, round(4032 * .12)))[3], 0)
+            self.assertEqual(output.getpixel((1512, 2016))[3], 255)
+            self.assertGreater(result.merged_islands, 0)
             self.assertLessEqual(result.resulting_colors, 32)
         finally:
             window.close()
