@@ -370,6 +370,49 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertTrue(destination.exists())
             window.close()
 
+    def test_real_photo_hole_compensation_changes_mask_and_restores_project(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow()
+            window.cleanup_toggle.setCurrentText("保留原色")
+            self.assertTrue(window.open_image(str(photo)))
+
+            def wait_for_preview():
+                deadline = time.monotonic() + 20
+                while window.output_generation != window.generation and time.monotonic() < deadline:
+                    self.app.processEvents()
+                    time.sleep(0.02)
+                self.assertEqual(window.output_generation, window.generation)
+                self.assertTrue(window.hole_safe)
+
+            def transparent_width():
+                alpha = window.output.getchannel("A")
+                y = round(window.output.height * .12)
+                return sum(alpha.getpixel((x, y)) == 0 for x in range(alpha.width))
+
+            wait_for_preview()
+            base_width = transparent_width()
+            window.hole_compensation_mm.setValue(.6)
+            wait_for_preview()
+            self.assertGreaterEqual(transparent_width(), base_width + 6)
+            self.assertAlmostEqual(window._settings()[1].hole_diameter_mm, 4.6)
+            self.assertAlmostEqual(window.input_canvas.hole_fraction, 4.6 / 60)
+            project = root / "project.lpproj"
+            save_project(project, window._project_data())
+            window.undo()
+            self.assertEqual(window.hole_compensation_mm.value(), 0)
+            with patch("lumina_pendant_prep.app.QFileDialog.getOpenFileName", return_value=(str(project), "")):
+                window.load_project_dialog()
+            self.assertAlmostEqual(window.hole_compensation_mm.value(), .6)
+            wait_for_preview()
+            with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName",
+                       return_value=(str(root / "compensated.png"), "")), \
+                 patch("lumina_pendant_prep.app.QMessageBox.information") as notice:
+                window.export_png()
+            self.assertIn("目标 4 + 补偿 0.6 mm", notice.call_args.args[2])
+            window.close()
+
     def test_project_relinks_moved_photo_and_preserves_current_image_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -179,11 +179,14 @@ class MainWindow(QMainWindow):
         self.crop_tool = QComboBox(); self.crop_tool.addItems(["拖动设置裁切框", "点击设置孔位置", "点击绘制多边形", "拖动添加保护区域"])
         self.hole_toggle = QComboBox(); self.hole_toggle.addItems(["启用透明挂绳孔", "关闭挂绳孔"])
         self.hole_mm = self._double(4, 0.5, 30, 0.5)
+        self.hole_compensation_mm = self._double(0, 0, 5, 0.05)
+        self.hole_compensation_mm.setToolTip("将补偿值加到目标孔径后裁切 PNG。默认 0；请根据切片或实物测量调整。")
         shape_form.addRow("外形", self.shape)
         shape_form.addRow("圆角半径 (mm)", self.corner_mm)
         shape_form.addRow("画布操作", self.crop_tool)
         shape_form.addRow("挂绳孔", self.hole_toggle)
-        shape_form.addRow("孔径 (mm)", self.hole_mm)
+        shape_form.addRow("目标孔径 (mm)", self.hole_mm)
+        shape_form.addRow("孔径补偿 (mm)", self.hole_compensation_mm)
         control_layout.addWidget(shape_group)
         edit_hint = QLabel("拖动照片设置裁切框或添加保护区域；保护区域保留原色。绘制多边形：左键添加节点，右键结束。")
         edit_hint.setWordWrap(True)
@@ -236,7 +239,7 @@ class MainWindow(QMainWindow):
             lambda i: self.input_canvas.set_mode(["crop", "hole", "outline", "protect"][i])
         )
         for widget in (self.width_mm, self.min_feature_mm, self.colors, self.color_delta,
-                       self.shape, self.corner_mm, self.hole_toggle, self.hole_mm,
+                       self.shape, self.corner_mm, self.hole_toggle, self.hole_mm, self.hole_compensation_mm,
                        self.cleanup_toggle):
             signal = widget.valueChanged if isinstance(widget, (QDoubleSpinBox, QSpinBox)) else widget.currentIndexChanged
             signal.connect(self._schedule_preview)
@@ -356,7 +359,7 @@ class MainWindow(QMainWindow):
             return
         shape = "Circle" if self.shape.currentText() == "圆形" else "Rectangle"
         output_width = pendant_pixel_width(self.source.size, self.crop, shape)
-        fraction = self.hole_mm.value() / self.width_mm.value() * output_width / self.source.width
+        fraction = self._effective_hole_mm() / self.width_mm.value() * output_width / self.source.width
         self.input_canvas.set_geometry(self.crop, self.hole, fraction, self.polygon)
         self.input_canvas.set_protected_regions(self.protected_regions)
 
@@ -378,7 +381,7 @@ class MainWindow(QMainWindow):
                                   "圆形": "Circle", "自定义多边形": "Polygon"}[self.shape.currentText()],
             corner_radius_mm=self.corner_mm.value(), target_width_mm=self.width_mm.value(),
             hole_enabled=False, hole_x=hx, hole_y=hy,
-            hole_diameter_mm=self.hole_mm.value(), polygon=tuple(self.polygon),
+            hole_diameter_mm=self._effective_hole_mm(), polygon=tuple(self.polygon),
         )
         wall_mm = max(1.2, self.nozzle_mm.currentData() * 2)
         self.hole_safe = (requested_hole and hole_in_crop
@@ -386,6 +389,9 @@ class MainWindow(QMainWindow):
                           and hole_has_opaque_surrounding(self.source, pendant, wall_mm))
         pendant = replace(pendant, hole_enabled=self.hole_safe)
         return cleanup, pendant
+
+    def _effective_hole_mm(self):
+        return self.hole_mm.value() + self.hole_compensation_mm.value()
 
     def _schedule_preview(self, *_):
         if self.source is not None:
@@ -544,6 +550,7 @@ class MainWindow(QMainWindow):
             self.corner_mm.setValue(data.get("corner_radius_mm", 3))
             self.hole_toggle.setCurrentIndex(0 if data.get("hole_enabled", True) else 1)
             self.hole_mm.setValue(data.get("hole_diameter_mm", 4))
+            self.hole_compensation_mm.setValue(data.get("hole_compensation_mm", 0))
         finally:
             self._loading_project = previous_loading
         self._history_current = self._project_data()
@@ -576,8 +583,14 @@ class MainWindow(QMainWindow):
             filename = self.write_png(self.output, filename)
             width_mm = self.width_mm.value()
             height_mm = width_mm * self.output.height / self.output.width
-            hole_info = (f"挂绳孔直径约 {self.hole_mm.value():g} mm。"
-                         if self.hole_toggle.currentIndex() == 0 else "挂绳孔已关闭。")
+            if self.hole_toggle.currentIndex() == 0:
+                hole_info = f"挂绳孔直径约 {self._effective_hole_mm():g} mm"
+                if self.hole_compensation_mm.value():
+                    hole_info += (f"（目标 {self.hole_mm.value():g} + "
+                                  f"补偿 {self.hole_compensation_mm.value():g} mm）")
+                hole_info += "。"
+            else:
+                hole_info = "挂绳孔已关闭。"
             QMessageBox.information(self, "已导出", f"透明 PNG 已保存：\n{filename}\n\n"
                                     f"目标尺寸约 {width_mm:g} × {height_mm:.2f} mm；{hole_info}\n"
                                     f"导入 Lumina 时请将目标宽度设为 {width_mm:g} mm，"
@@ -634,6 +647,7 @@ class MainWindow(QMainWindow):
             "protected_regions": self.protected_regions,
             "hole_enabled": self.hole_toggle.currentIndex() == 0,
             "hole_diameter_mm": self.hole_mm.value(),
+            "hole_compensation_mm": self.hole_compensation_mm.value(),
         }
 
     def save_project_dialog(self):

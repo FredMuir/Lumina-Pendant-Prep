@@ -140,6 +140,9 @@ class ImageAndProjectTests(unittest.TestCase):
             save_project(path, {"source_path": "photo.png", "crop": [0, 0, 0, 1]})
             with self.assertRaisesRegex(ValueError, "crop"):
                 load_project(path)
+            save_project(path, {"source_path": "photo.png", "hole_compensation_mm": -0.3})
+            with self.assertRaisesRegex(ValueError, "hole_compensation_mm"):
+                load_project(path)
 
     def test_failed_project_replace_preserves_previous_file(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -82,7 +82,8 @@ def load_project(path: str | Path) -> dict[str, Any]:
             raise ValueError("Invalid protected regions")
     for key, low, high in (("target_width_mm", 1, 300), ("nozzle_mm", 0.1, 2),
                            ("min_feature_mm", 0, 5), ("color_delta", 0, 40),
-                           ("corner_radius_mm", 0, 30), ("hole_diameter_mm", 0.5, 30)):
+                           ("corner_radius_mm", 0, 30), ("hole_diameter_mm", 0.5, 30),
+                           ("hole_compensation_mm", 0, 5)):
         if key in data and not number(data[key], low, high):
             raise ValueError(f"Invalid {key}")
     if "colors" in data and (type(data["colors"]) is not int or not 2 <= data["colors"] <= 128):
