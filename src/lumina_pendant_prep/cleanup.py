@@ -101,8 +101,8 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
     merged_islands = 0
     narrow_features = 0
     if minimum_area > 1:
-        # Each small connected component is assigned once, based on the original label map.
-        proposed: list[tuple[int, int, np.ndarray, int]] = []
+        # Update labels after each merge so adjacent tiny components cannot
+        # exchange colors simultaneously and remain fragmented.
         kernel = np.asarray([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
         for color in sorted(int(v) for v in np.unique(labels[opaque])):
             mask = ((labels == color) & opaque).astype(np.uint8)
@@ -138,11 +138,8 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
                         pair[0],
                     ),
                 )[0]
-                proposed.append((x0, y0, component, chosen))
-        for x0, y0, component, chosen in proposed:
-            h, w = component.shape
-            labels[y0:y0 + h, x0:x0 + w][component] = chosen
-            merged_islands += 1
+                labels[y0:y1, x0:x1][component] = chosen
+                merged_islands += 1
 
     output_rgb = np.zeros((height, width, 3), dtype=np.uint8)
     for color in np.unique(labels[opaque]):

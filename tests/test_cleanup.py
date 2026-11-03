@@ -7,6 +7,15 @@ from lumina_pendant_prep.cleanup import CleanupSettings, simplify_image
 
 
 class CleanupTests(unittest.TestCase):
+    def test_adjacent_small_islands_do_not_swap_colors(self):
+        source = Image.new("RGB", (2, 1))
+        source.putdata([(230, 20, 30), (20, 40, 230)])
+        result = simplify_image(source, CleanupSettings(
+            colors=2, target_width_mm=2, min_feature_mm=2, color_delta=0,
+        ))
+        self.assertEqual(result.resulting_colors, 1)
+        self.assertEqual(result.image.getpixel((0, 0)), result.image.getpixel((1, 0)))
+
     def test_merges_small_island_and_preserves_transparency(self):
         pixels = np.zeros((80, 100, 4), dtype=np.uint8)
         pixels[:] = (220, 25, 30, 255)
