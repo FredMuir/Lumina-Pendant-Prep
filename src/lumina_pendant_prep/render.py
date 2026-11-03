@@ -18,14 +18,19 @@ class PendantSettings:
     polygon: tuple[tuple[float, float], ...] = ()
 
 
-def pendant_pixel_width(image_size: tuple[int, int], crop: tuple[float, float, float, float],
-                        shape: str) -> int:
+def crop_pixel_box(image_size: tuple[int, int], crop: tuple[float, float, float, float]) -> tuple[int, int, int, int]:
     width, height = image_size
     left, top, right, bottom = crop
     x0 = max(0, min(width - 1, round(left * width)))
     y0 = max(0, min(height - 1, round(top * height)))
     x1 = max(x0 + 1, min(width, round(right * width)))
     y1 = max(y0 + 1, min(height, round(bottom * height)))
+    return x0, y0, x1, y1
+
+
+def pendant_pixel_width(image_size: tuple[int, int], crop: tuple[float, float, float, float],
+                        shape: str) -> int:
+    x0, y0, x1, y1 = crop_pixel_box(image_size, crop)
     return min(x1 - x0, y1 - y0) if shape == "Circle" else x1 - x0
 
 
@@ -33,11 +38,7 @@ def hole_has_clearance(image_size: tuple[int, int], settings: PendantSettings,
                        minimum_wall_mm: float = 1.2) -> bool:
     """Return whether the entire round hole plus a material wall fits inside the outline."""
     image_width, image_height = image_size
-    left, top, right, bottom = settings.crop
-    x0 = max(0, min(image_width - 1, round(left * image_width)))
-    y0 = max(0, min(image_height - 1, round(top * image_height)))
-    x1 = max(x0 + 1, min(image_width, round(right * image_width)))
-    y1 = max(y0 + 1, min(image_height, round(bottom * image_height)))
+    x0, y0, x1, y1 = crop_pixel_box(image_size, settings.crop)
     source_w, source_h = x1 - x0, y1 - y0
     offset_x = offset_y = 0
     if settings.shape == "Circle":
@@ -99,11 +100,7 @@ def hole_has_opaque_surrounding(image: Image.Image, settings: PendantSettings,
                                 minimum_wall_mm: float = 1.2) -> bool:
     """Check that source transparency does not interrupt the hole or its wall."""
     width, height = image.size
-    left, top, right, bottom = settings.crop
-    x0 = max(0, min(width - 1, round(left * width)))
-    y0 = max(0, min(height - 1, round(top * height)))
-    x1 = max(x0 + 1, min(width, round(right * width)))
-    y1 = max(y0 + 1, min(height, round(bottom * height)))
+    x0, y0, x1, y1 = crop_pixel_box(image.size, settings.crop)
     scale = pendant_pixel_width(image.size, settings.crop, settings.shape) / settings.target_width_mm
     cx = x0 + settings.hole_x * (x1 - x0)
     cy = y0 + settings.hole_y * (y1 - y0)
@@ -119,11 +116,7 @@ def hole_has_opaque_surrounding(image: Image.Image, settings: PendantSettings,
 
 def make_pendant(image: Image.Image, settings: PendantSettings) -> Image.Image:
     width, height = image.size
-    left, top, right, bottom = settings.crop
-    x0 = max(0, min(width - 1, round(left * width)))
-    y0 = max(0, min(height - 1, round(top * height)))
-    x1 = max(x0 + 1, min(width, round(right * width)))
-    y1 = max(y0 + 1, min(height, round(bottom * height)))
+    x0, y0, x1, y1 = crop_pixel_box(image.size, settings.crop)
     source_crop = image.convert("RGBA").crop((x0, y0, x1, y1))
     source_w, source_h = source_crop.size
     offset_x = offset_y = 0

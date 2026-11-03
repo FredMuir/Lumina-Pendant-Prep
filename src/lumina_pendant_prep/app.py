@@ -17,7 +17,7 @@ from .canvas import ImageCanvas
 from .cleanup import CleanupSettings, simplify_image
 from .image_io import open_rgba
 from .project import load_project, save_project
-from .render import (PendantSettings, hole_has_clearance, hole_has_opaque_surrounding,
+from .render import (PendantSettings, crop_pixel_box, hole_has_clearance, hole_has_opaque_surrounding,
                      make_pendant, pendant_pixel_width)
 
 
@@ -266,10 +266,10 @@ class MainWindow(QMainWindow):
 
     def _settings(self):
         crop_left, crop_top, crop_right, crop_bottom = self.crop
-        crop_w, crop_h = crop_right - crop_left, crop_bottom - crop_top
         hole_in_crop = crop_left <= self.hole[0] <= crop_right and crop_top <= self.hole[1] <= crop_bottom
-        hx = min(1.0, max(0.0, (self.hole[0] - crop_left) / max(crop_w, 0.001)))
-        hy = min(1.0, max(0.0, (self.hole[1] - crop_top) / max(crop_h, 0.001)))
+        x0, y0, x1, y1 = crop_pixel_box(self.source.size, self.crop)
+        hx = min(1.0, max(0.0, (self.hole[0] * self.source.width - x0) / (x1 - x0)))
+        hy = min(1.0, max(0.0, (self.hole[1] * self.source.height - y0) / (y1 - y0)))
         shape = "Circle" if self.shape.currentText() == "圆形" else "Rectangle"
         output_width = pendant_pixel_width(self.source.size, self.crop, shape)
         effective_width = self.width_mm.value() * self.source.width / output_width

@@ -37,6 +37,11 @@ class GuiSmokeTests(unittest.TestCase):
             cleanup, _ = window._settings()
             self.assertAlmostEqual(window.source.width / cleanup.target_width_mm, 1.0)
             window.shape.setCurrentText("圆角矩形")
+            window.crop = (0.123, 0.123, 0.877, 0.877)
+            window.hole = (0.5, 0.4)
+            _, pendant = window._settings()
+            self.assertAlmostEqual(pendant.hole_y, (24 - 7) / (53 - 7))
+            window.crop, window.hole = (0, 0, 1, 1), (0.5, 0.12)
 
             # A setting change must not export the previous preview while the
             # replacement preview is still queued or running.
