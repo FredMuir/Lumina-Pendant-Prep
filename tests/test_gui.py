@@ -10,13 +10,34 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
-from lumina_pendant_prep.app import MainWindow
+from lumina_pendant_prep.app import MainWindow, PreviewJob
+from lumina_pendant_prep.cleanup import CleanupSettings
+from lumina_pendant_prep.render import PendantSettings
 
 
 class GuiSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_preview_palette_ignores_outside_crop_and_preserves_outline_alpha(self):
+        outputs = []
+        pendant = PendantSettings(crop=(0.25, 0, 0.75, 1), shape="Rounded rectangle",
+                                  target_width_mm=50, corner_radius_mm=8, hole_enabled=False)
+        for background in ((0, 255, 0, 255), (255, 255, 0, 255)):
+            image = Image.new("RGBA", (100, 50), background)
+            image.paste((255, 0, 0, 255), (25, 0, 50, 50))
+            image.paste((0, 0, 255, 255), (50, 0, 75, 50))
+            job = PreviewJob(1, image, CleanupSettings(2, 100, 0, 0), pendant, True)
+            captured = []
+            job.signals.finished.connect(lambda generation, prepared, output, result: captured.append(output))
+            job.run()
+            self.assertEqual(len(captured), 1)
+            outputs.append(captured[0])
+        self.assertEqual(outputs[0].tobytes(), outputs[1].tobytes())
+        from lumina_pendant_prep.render import make_pendant
+        self.assertEqual(outputs[0].getchannel("A").tobytes(),
+                         make_pendant(image, pendant).getchannel("A").tobytes())
 
     def test_window_loads_photo_and_updates_preview_and_history(self):
         with tempfile.TemporaryDirectory() as directory:

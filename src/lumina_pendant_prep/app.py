@@ -40,8 +40,23 @@ class PreviewJob(QRunnable):
     def run(self):
         try:
             if self.enabled:
-                result = simplify_image(self.image, self.cleanup)
+                # Analyze only pixels that survive the pendant outline. Restore
+                # the original alpha before final rendering to avoid applying
+                # antialiased outline transparency twice.
+                outline = make_pendant(self.image, replace(self.pendant, hole_enabled=False))
+                x0, y0, x1, y1 = crop_pixel_box(self.image.size, self.pendant.crop)
+                if self.pendant.shape == "Circle":
+                    side = min(x1 - x0, y1 - y0)
+                    x0 += (x1 - x0 - side) // 2
+                    y0 += (y1 - y0 - side) // 2
+                selection = Image.new("L", self.image.size, 0)
+                selection.paste(outline.getchannel("A"), (x0, y0))
+                analysis_image = self.image.convert("RGBA")
+                original_alpha = analysis_image.getchannel("A")
+                analysis_image.putalpha(selection)
+                result = simplify_image(analysis_image, self.cleanup)
                 prepared = result.image
+                prepared.putalpha(original_alpha)
             else:
                 result = None
                 prepared = self.image
