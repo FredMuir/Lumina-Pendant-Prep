@@ -1,6 +1,6 @@
 # Lumina Pendant Prep
 
-Windows 和 macOS 桌面图像预处理工具，面向 Lumina-Layers 等多层叠色 FDM 工作流。当前版本提供可运行的图形界面原型，可视化净化色块、编辑挂坠裁切并导出透明 PNG。
+面向 Lumina-Layers 等多层叠色 FDM 工作流的桌面图像预处理工具。当前阶段专注完成 Windows 版；功能与 Windows 体验验证通过后，再开始 macOS 移植与打包。
 
 ## 目标
 
@@ -17,9 +17,9 @@ Windows 和 macOS 桌面图像预处理工具，面向 Lumina-Layers 等多层�
 
 算法输出是打印可行性估计。真实照片和材料组合仍应先打印小样确认；复杂照片中的窄线不会被默认删掉，而会给出提示。
 
-## 运行
+## Windows 开发环境
 
-需要 Python 3.10 或更新版本。Windows/macOS 本地开发环境均可执行：
+需要 Python 3.10 或更新版本。当前首发开发与验证环境为 Windows：
 
 ```bash
 python -m venv .venv
@@ -33,15 +33,13 @@ python -m pip install -e .
 python run_app.py
 ```
 
-macOS：
+GitHub Actions 当前只在 Windows x64 runner 上构建 Windows 版打包产物。macOS 目标暂缓，待 Windows 功能齐全并通过验证后再启动。
 
-```bash
-source .venv/bin/activate
-python -m pip install -e .
-python run_app.py
+运行核心和图形界面验证：
+
+```powershell
+python -m unittest discover -s tests -v
 ```
-
-GitHub Actions 在 Windows x64、macOS Apple Silicon 和 macOS Intel runner 上分别生成未签名的打包产物。macOS 用户需在首次运行时手动确认打开；代码签名/公证和最终用户安装体验仍需后续完善。
 
 ## 许可证状态
 

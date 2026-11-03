@@ -1,0 +1,60 @@
+import os
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PIL import Image
+from PySide6.QtWidgets import QApplication
+
+from lumina_pendant_prep.app import MainWindow
+
+
+class GuiSmokeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_window_loads_photo_and_updates_preview_and_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sample.png"
+            Image.new("RGBA", (80, 60), (30, 150, 210, 255)).save(path)
+            window = MainWindow()
+            window.open_image(str(path))
+            deadline = time.monotonic() + 10
+            while window.output is None and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.02)
+            self.assertIsNotNone(window.output)
+            self.assertEqual(window.output.mode, "RGBA")
+            self.assertEqual(window.output_canvas.image.width(), 80)
+            self.assertTrue(window._settings()[1].hole_enabled)
+
+            # Exercise the same writer used by the export dialog and verify the
+            # transparency and physical-size metadata survive a real PNG roundtrip.
+            exported = Path(directory) / "pendant"
+            saved_path = window.write_png(window.output, str(exported))
+            with Image.open(saved_path) as reopened:
+                rgba = reopened.convert("RGBA")
+                self.assertEqual(rgba.getpixel((0, 0))[3], 0)
+                self.assertEqual(rgba.getpixel((40, 7))[3], 0)
+                self.assertGreater(rgba.getpixel((40, 35))[3], 240)
+                self.assertAlmostEqual(reopened.info["dpi"][0], window.output.info["dpi"][0], delta=0.1)
+
+            window.crop = (0.08, 0.10, 0.92, 0.90)
+            window.hole = (0.5, 0.12)
+            self.assertFalse(window._settings()[1].hole_enabled)
+
+            window.width_mm.setValue(70)
+            self.assertEqual(window.width_mm.value(), 70)
+            window.undo()
+            self.assertEqual(window.width_mm.value(), 60)
+            window.redo()
+            self.assertEqual(window.width_mm.value(), 70)
+            window.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

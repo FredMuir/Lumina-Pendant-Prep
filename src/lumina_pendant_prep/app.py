@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from PIL import Image, ImageChops
@@ -16,7 +17,7 @@ from .canvas import ImageCanvas
 from .cleanup import CleanupSettings, simplify_image
 from .image_io import open_rgba
 from .project import load_project, save_project
-from .render import PendantSettings, make_pendant
+from .render import PendantSettings, hole_has_clearance, make_pendant
 
 
 class PreviewSignals(QObject):
@@ -63,6 +64,7 @@ class MainWindow(QMainWindow):
         self.prepared: Image.Image | None = None
         self.output: Image.Image | None = None
         self.preview_changed: Image.Image | None = None
+        self.hole_safe = False
         self.generation = 0
         self.preview_running = False
         self.active_job: PreviewJob | None = None
@@ -269,13 +271,18 @@ class MainWindow(QMainWindow):
         cleanup = CleanupSettings(self.colors.value(), effective_width,
                                   max(self.min_feature_mm.value(), self.nozzle_mm.value()),
                                   self.color_delta.value())
+        requested_hole = self.hole_toggle.currentIndex() == 0
         pendant = PendantSettings(
             crop=self.crop, shape={"圆角矩形": "Rounded rectangle", "矩形": "Rectangle",
                                   "圆形": "Circle", "自定义多边形": "Polygon"}[self.shape.currentText()],
             corner_radius_mm=self.corner_mm.value(), target_width_mm=self.width_mm.value(),
-            hole_enabled=self.hole_toggle.currentIndex() == 0 and hole_in_crop, hole_x=hx, hole_y=hy,
+            hole_enabled=False, hole_x=hx, hole_y=hy,
             hole_diameter_mm=self.hole_mm.value(), polygon=tuple(self.polygon),
         )
+        self.hole_safe = requested_hole and hole_in_crop and hole_has_clearance(
+            self.source.size, pendant, minimum_wall_mm=max(1.2, self.nozzle_mm.value() * 2)
+        )
+        pendant = replace(pendant, hole_enabled=self.hole_safe)
         return cleanup, pendant
 
     def _schedule_preview(self, *_):
@@ -310,10 +317,7 @@ class MainWindow(QMainWindow):
         self.preview_changed = result.changed_mask if result else None
         self._refresh_output_canvas()
         if result:
-            hole_outside = self.hole_toggle.currentIndex() == 0 and not (
-                self.crop[0] <= self.hole[0] <= self.crop[2] and self.crop[1] <= self.hole[1] <= self.crop[3]
-            )
-            hole_note = " · 孔位在裁切框外，请重新定位" if hole_outside else ""
+            hole_note = " · 孔位太靠近轮廓，无法留出材料边距；当前不会裁孔" if self.hole_toggle.currentIndex() == 0 and not self.hole_safe else ""
             self.status.setText(
                 f"预览就绪 · 调色 {result.original_colors} → {result.resulting_colors} 色 · "
                 f"合并 {result.merged_islands} 个小色岛 · 最小特征约 {result.minimum_feature_px}px "
@@ -321,10 +325,7 @@ class MainWindow(QMainWindow):
                 f"孔和背景均导出为透明像素。{hole_note}"
             )
         else:
-            hole_outside = self.hole_toggle.currentIndex() == 0 and not (
-                self.crop[0] <= self.hole[0] <= self.crop[2] and self.crop[1] <= self.hole[1] <= self.crop[3]
-            )
-            hole_note = " · 孔位在裁切框外，请重新定位" if hole_outside else ""
+            hole_note = " · 孔位太靠近轮廓，无法留出材料边距；当前不会裁孔" if self.hole_toggle.currentIndex() == 0 and not self.hole_safe else ""
             self.status.setText(f"预览就绪 · 保留原始颜色 · 孔和背景均导出为透明像素。{hole_note}")
         self._update_status()
 
@@ -421,12 +422,18 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
-            if Path(filename).suffix.lower() != ".png":
-                filename += ".png"
-            self.output.save(filename, format="PNG", dpi=self.output.info.get("dpi", (300, 300)))
+            filename = self.write_png(self.output, filename)
             QMessageBox.information(self, "已导出", f"透明 PNG 已保存：\n{filename}")
         except OSError as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
+
+    @staticmethod
+    def write_png(image: Image.Image, filename: str) -> str:
+        path = Path(filename)
+        if path.suffix.lower() != ".png":
+            path = path.with_suffix(path.suffix + ".png" if path.suffix else ".png")
+        image.save(path, format="PNG", dpi=image.info.get("dpi", (300, 300)))
+        return str(path)
 
     def _project_data(self):
         return {

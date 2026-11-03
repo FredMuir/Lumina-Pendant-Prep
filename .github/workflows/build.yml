@@ -11,20 +11,7 @@ permissions:
 
 jobs:
   package:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact: windows-x64
-            output: dist/LuminaPendantPrep
-          - os: macos-15
-            artifact: macos-arm64
-            output: dist/LuminaPendantPrep.app
-          - os: macos-15-intel
-            artifact: macos-x64
-            output: dist/LuminaPendantPrep.app
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +21,10 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install app and packager
         run: python -m pip install --upgrade pip && python -m pip install . pyinstaller
+      - name: Run Windows-compatible test suite
+        run: python -m unittest discover -s tests -v
+        env:
+          QT_QPA_PLATFORM: offscreen
       - name: Package desktop app
         run: >-
           pyinstaller --clean --noconfirm --windowed --onedir
@@ -44,8 +35,8 @@ jobs:
           run_app.py
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.output }}
+          name: windows-x64
+          path: dist/LuminaPendantPrep
           if-no-files-found: error
           retention-days: 14
 

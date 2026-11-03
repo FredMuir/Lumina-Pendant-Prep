@@ -128,7 +128,8 @@
 - 已实现 EXIF 方向处理、常见栅格格式及 pillow-heif 接入、ICC 到 sRGB 的尽力转换。
 - 已实现无抖动调色、相邻 Lab 近似色合并、小连通域按物理尺寸合并，以及狭窄区域提示。
 - 已实现矩形/圆形/圆角矩形/多边形 alpha 裁切、透明孔、PNG 导出和 DPI 元数据。
-- GitHub Actions 已配置 Windows x64、macOS Apple Silicon、macOS Intel 三种打包任务。安装包签名、公证、完整跨平台运行和实物打印仍待验证。
+- 项目按用户新确定的顺序聚焦 Windows 首发。GitHub Actions 只构建 Windows x64；macOS 移植与打包须等 Windows 功能完整且验证通过后再开始。
+- Windows 安装包签名和实物打印仍待验证。
 - 实现是首个原型；默认参数和照片保真需结合真实打印反馈调整。
 
 ## 参考链接
