@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from .canvas import ImageCanvas
 from .cleanup import CleanupSettings, ProcessingCancelled, simplify_image
-from .image_io import open_rgba
+from .image_io import open_rgba, SRGB_PROFILE
 from .project import load_project, save_project, source_path_for_project, resolve_project_source
 from .render import (PendantSettings, crop_pixel_box, hole_has_clearance, hole_has_opaque_surrounding,
                      make_pendant, pendant_pixel_width)
@@ -459,6 +459,12 @@ class MainWindow(QMainWindow):
         min_px = width_px / self.width_mm.value() * max(self.min_feature_mm.value(), self.nozzle_mm.currentData())
         name = self.source_path.name if self.source_path else "图像"
         summary = f"{name} · 成品宽度约 {physical_width:.1f} mm · 目标最小特征约 {min_px:.1f} px"
+        color_status = self.source.info.get("lpp_color_status")
+        color_note = {"converted_srgb": "ICC 已转换为 sRGB",
+                      "assumed_srgb": "无 ICC，按 sRGB 处理",
+                      "invalid_icc": "ICC 无法转换，按 sRGB 处理，颜色可能不准确"}.get(color_status)
+        if color_note:
+            summary += f" · {color_note}"
         if min_px < 1:
             summary += " · 特征阈值低于 1 px，请提高输出分辨率或物理特征宽度"
         self.source_info.setText(summary)
@@ -583,7 +589,8 @@ class MainWindow(QMainWindow):
             with tempfile.NamedTemporaryFile(mode="w+b", dir=path.parent,
                                              prefix=f".{path.name}.", suffix=".tmp", delete=False) as file:
                 temporary = Path(file.name)
-                image.save(file, format="PNG", dpi=image.info.get("dpi", (300, 300)))
+                image.save(file, format="PNG", dpi=image.info.get("dpi", (300, 300)),
+                           icc_profile=SRGB_PROFILE)
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temporary, path)

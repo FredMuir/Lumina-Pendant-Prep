@@ -99,6 +99,27 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(cancelled, [old_job.generation])
         window.close()
 
+    def test_real_photo_invalid_profile_warning_and_srgb_export(self):
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "invalid-profile.png"
+            with Image.open(photo) as original:
+                original.resize((320, 180), Image.Resampling.LANCZOS).save(source, icc_profile=b"invalid profile")
+            window = MainWindow()
+            window.cleanup_toggle.setCurrentText("保留原色")
+            self.assertTrue(window.open_image(str(source)))
+            deadline = time.monotonic() + 20
+            while window.output_generation != window.generation and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.02)
+            self.assertEqual(window.output_generation, window.generation)
+            self.assertIn("ICC 无法转换", window.source_info.text())
+            destination = window.write_png(window.output, str(Path(directory) / "output.png"))
+            with Image.open(destination) as png:
+                from lumina_pendant_prep.image_io import SRGB_PROFILE
+                self.assertEqual(png.info.get("icc_profile"), SRGB_PROFILE)
+            window.close()
+
     def test_real_photo_protected_region_is_preserved_and_project_restored(self):
         photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
         with tempfile.TemporaryDirectory() as directory:

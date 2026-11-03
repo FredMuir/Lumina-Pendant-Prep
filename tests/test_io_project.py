@@ -7,7 +7,7 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image, ImageCms
 
-from lumina_pendant_prep.image_io import open_rgba
+from lumina_pendant_prep.image_io import open_rgba, SRGB_PROFILE
 from lumina_pendant_prep.project import load_project, save_project, source_path_for_project, resolve_project_source
 
 
@@ -58,6 +58,17 @@ class ImageAndProjectTests(unittest.TestCase):
             rgba.save(transparent, icc_profile=profile)
             loaded = open_rgba(transparent)
             self.assertEqual(loaded.getchannel("A").tobytes(), rgba.getchannel("A").tobytes())
+            self.assertEqual(loaded.info["lpp_color_status"], "converted_srgb")
+
+    def test_real_photo_invalid_icc_reports_fallback(self):
+        fixture = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid-profile.png"
+            with Image.open(fixture) as photo:
+                photo.resize((320, 180), Image.Resampling.LANCZOS).save(path, icc_profile=b"invalid profile")
+            loaded = open_rgba(path)
+            self.assertEqual(loaded.info["lpp_color_status"], "invalid_icc")
+            self.assertEqual(loaded.info["icc_profile"], SRGB_PROFILE)
 
     def test_project_and_photo_can_move_together(self):
         with tempfile.TemporaryDirectory() as directory:

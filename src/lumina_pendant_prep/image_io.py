@@ -18,6 +18,8 @@ SUPPORTED_SUFFIXES = {
     ".heic", ".heif", ".avif",
 }
 
+SRGB_PROFILE = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+
 
 def open_rgba(path: str | Path) -> Image.Image:
     """Decode a still image, apply its EXIF orientation and normalize to sRGB RGBA."""
@@ -28,6 +30,7 @@ def open_rgba(path: str | Path) -> Image.Image:
         opened.seek(0)  # Multi-image HEIF/TIFF inputs use their primary/first frame.
         image = ImageOps.exif_transpose(opened)
         icc = image.info.get("icc_profile")
+        color_status = "assumed_srgb"
         if icc:
             try:
                 source_profile = ImageCms.ImageCmsProfile(BytesIO(icc))
@@ -41,9 +44,14 @@ def open_rgba(path: str | Path) -> Image.Image:
                 image = rgb.convert("RGBA")
                 if alpha is not None:
                     image.putalpha(alpha)
-            except (OSError, ValueError):
+                color_status = "converted_srgb"
+            except (OSError, ValueError, ImageCms.PyCMSError):
                 image = image.convert("RGBA")
+                color_status = "invalid_icc"
         else:
             image = image.convert("RGBA")
+        # Never carry an invalid or source-space profile into sRGB output.
+        image.info["icc_profile"] = SRGB_PROFILE
+        image.info["lpp_color_status"] = color_status
         return image.copy()
 
