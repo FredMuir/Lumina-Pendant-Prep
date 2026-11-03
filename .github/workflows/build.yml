@@ -27,6 +27,22 @@ jobs:
           QT_QPA_PLATFORM: offscreen
       - name: Package desktop app
         run: pyinstaller --clean --noconfirm LuminaPendantPrep.spec
+      - name: Smoke test packaged app with real photo
+        env:
+          QT_QPA_PLATFORM: offscreen
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'dist/LuminaPendantPrep/LuminaPendantPrep.exe').Path
+          $photo = (Resolve-Path 'tests/fixtures/cat-photo.jpg').Path
+          $output = Join-Path $env:RUNNER_TEMP 'lumina-packaged-smoke.png'
+          $process = Start-Process -FilePath $exe -ArgumentList @('--smoke-test', ('"' + $photo + '"'), ('"' + $output + '"')) -PassThru -WindowStyle Hidden
+          if (-not $process.WaitForExit(120000)) {
+            $process.Kill()
+            throw 'Packaged app smoke test timed out'
+          }
+          if ($process.ExitCode -ne 0) { throw "Packaged app exited with code $($process.ExitCode)" }
+          python -c "from PIL import Image; import sys; p=Image.open(sys.argv[1]); assert p.mode == 'RGBA' and p.size == (1920,1080); assert p.getpixel((0,0))[3] == 0; assert p.getpixel((960,130))[3] == 0; print('Packaged PNG verified')" $output
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged PNG verification failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64

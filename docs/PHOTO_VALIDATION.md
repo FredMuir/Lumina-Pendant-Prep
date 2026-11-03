@@ -4,7 +4,7 @@
 
 ### 原生 HEIC 本机记录
 
-已使用 [libheif 问题 #1190](https://github.com/strukturag/libheif/issues/1190) 中公开的 iPhone 15 Pro / iOS 18 原生照片进行一次本机 Windows 验证，文件 SHA-256 为 `4b887e6bc345191cbb9836602373b3ec454558ccc62d3518041e085117238fe0`；[样本信息](https://managingwp.github.io/heic-ios18-fix/samples/)列出了设备、校验值和来源。由于照片自身再分发授权尚不明确，原件仅放在本机忽略目录，不纳入本仓库。源代码运行的 GUI 以保留原色模式成功打开、预览并导出 3024 × 4032 RGBA PNG，孔心和外部角点 alpha 为 0。该样本不能证明 HDR 色彩准确、其他手机兼容、最新打包程序的解码能力或打印效果。
+已使用 [libheif 问题 #1190](https://github.com/strukturag/libheif/issues/1190) 中公开的 iPhone 15 Pro / iOS 18 原生照片进行本机 Windows 验证，文件 SHA-256 为 `4b887e6bc345191cbb9836602373b3ec454558ccc62d3518041e085117238fe0`；[样本信息](https://managingwp.github.io/heic-ios18-fix/samples/)列出了设备、校验值和来源。由于照片自身再分发授权尚不明确，原件仅放在本机忽略目录，不纳入本仓库。源代码和本机 PyInstaller 文件夹版均通过离屏 GUI 自动流程，以保留原色模式打开、预览并导出 3024 × 4032 RGBA PNG，孔心和外部角点 alpha 为 0。该样本不能证明 HDR 色彩准确、其他手机兼容、干净 Windows 环境或打印效果。
 
 取得相同原件后可在 Windows PowerShell 中运行可选回归测试（文件校验值必须匹配）：
 

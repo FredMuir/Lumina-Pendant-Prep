@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import os
 import tempfile
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -604,6 +605,7 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    smoke = len(sys.argv) == 4 and sys.argv[1] == "--smoke-test"
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet("""
@@ -618,6 +620,32 @@ def main():
     """)
     window = MainWindow()
     window.show()
+    if smoke:
+        source, destination = sys.argv[2:4]
+        window.cleanup_toggle.setCurrentText("保留原色")
+        # Avoid a modal error dialog if the fixture is missing or undecodable.
+        try:
+            open_rgba(source)
+        except Exception:
+            sys.exit(2)
+        if not window.open_image(source):
+            sys.exit(2)
+        deadline = time.monotonic() + 90
+
+        def finish_smoke():
+            if window.output is not None and window.output_generation == window.generation:
+                try:
+                    window.write_png(window.output, destination)
+                except Exception:
+                    app.exit(3)
+                    return
+                app.exit(0)
+            elif time.monotonic() >= deadline or window.status.text().startswith("预览失败"):
+                app.exit(4)
+            else:
+                QTimer.singleShot(100, finish_smoke)
+
+        QTimer.singleShot(0, finish_smoke)
     sys.exit(app.exec())
 
 

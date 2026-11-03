@@ -34,7 +34,7 @@ python -m pip install -e .
 python run_app.py
 ```
 
-GitHub Actions 当前只在 Windows x64 runner 上构建 Windows 版打包产物。macOS 目标暂缓，待 Windows 功能齐全并通过验证后再启动。
+GitHub Actions 当前只在 Windows x64 runner 上构建 Windows 版打包产物，并用实拍 JPEG 执行打包后离屏启动和透明 PNG 导出检查。macOS 目标暂缓，待 Windows 功能齐全并通过验证后再启动。
 
 本地生成 Windows 文件夹版（从项目根目录执行）：
 
