@@ -130,6 +130,8 @@ class MainWindow(QMainWindow):
         self.colors = QSpinBox(); self.colors.setRange(2, 128); self.colors.setValue(32)
         self.color_delta = self._double(8, 0, 40, 1)
         self.cleanup_toggle = QComboBox(); self.cleanup_toggle.addItems(["净化色块", "保留原色"])
+        self.cleanup_toggle.setToolTip("保留原色会跳过颜色量化和色块合并，仍会应用裁切和透明孔。")
+        self.cleanup_toggle.currentIndexChanged.connect(self._update_cleanup_controls)
         form.addRow("目标宽度 (mm)", self.width_mm)
         form.addRow("喷嘴直径 (mm)", self.nozzle_mm)
         form.addRow("最小特征宽度 (mm)", self.min_feature_mm)
@@ -200,6 +202,11 @@ class MainWindow(QMainWindow):
             signal.connect(self._schedule_preview)
         self.nozzle_mm.currentIndexChanged.connect(self._update_status)
         self.nozzle_mm.currentIndexChanged.connect(self._schedule_preview)
+
+    def _update_cleanup_controls(self, *_):
+        enabled = self.cleanup_toggle.currentIndex() == 0
+        self.colors.setEnabled(enabled)
+        self.color_delta.setEnabled(enabled)
 
     @staticmethod
     def _double(value: float, minimum: float, maximum: float, step: float) -> QDoubleSpinBox:

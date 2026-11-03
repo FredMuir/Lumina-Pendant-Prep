@@ -23,6 +23,36 @@ class GuiSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_real_photo_preserve_color_project_and_png(self):
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow()
+            window.cleanup_toggle.setCurrentText("保留原色")
+            self.assertFalse(window.colors.isEnabled())
+            self.assertFalse(window.color_delta.isEnabled())
+            window.shape.setCurrentText("矩形")
+            window.hole_toggle.setCurrentIndex(1)
+            self.assertTrue(window.open_image(str(photo)))
+            deadline = time.monotonic() + 20
+            while window.output_generation != window.generation and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.02)
+            self.assertEqual(window.output_generation, window.generation)
+            self.assertEqual(window.output.tobytes(), window.source.tobytes())
+            destination = window.write_png(window.output, str(root / "result.png"))
+            with Image.open(destination) as png:
+                self.assertEqual(png.convert("RGBA").tobytes(), window.source.tobytes())
+            project = root / "project.lpproj"
+            save_project(project, window._project_data())
+            window.cleanup_toggle.setCurrentText("净化色块")
+            self.assertTrue(window.colors.isEnabled())
+            with patch("lumina_pendant_prep.app.QFileDialog.getOpenFileName", return_value=(str(project), "")):
+                window.load_project_dialog()
+            self.assertEqual(window.cleanup_toggle.currentText(), "保留原色")
+            self.assertFalse(window.color_delta.isEnabled())
+            window.close()
+
     def test_heic_preview_exports_fully_transparent_hole(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
