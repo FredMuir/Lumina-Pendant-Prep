@@ -574,7 +574,14 @@ class MainWindow(QMainWindow):
             return
         try:
             filename = self.write_png(self.output, filename)
-            QMessageBox.information(self, "已导出", f"透明 PNG 已保存：\n{filename}")
+            width_mm = self.width_mm.value()
+            height_mm = width_mm * self.output.height / self.output.width
+            hole_info = (f"挂绳孔直径约 {self.hole_mm.value():g} mm。"
+                         if self.hole_toggle.currentIndex() == 0 else "挂绳孔已关闭。")
+            QMessageBox.information(self, "已导出", f"透明 PNG 已保存：\n{filename}\n\n"
+                                    f"目标尺寸约 {width_mm:g} × {height_mm:.2f} mm；{hole_info}\n"
+                                    f"导入 Lumina 时请将目标宽度设为 {width_mm:g} mm，"
+                                    "否则孔和成品尺寸会按比例改变。")
         except OSError as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
 

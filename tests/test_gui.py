@@ -346,6 +346,29 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertTrue(destination.exists())
             window.close()
 
+    def test_export_shows_lumina_width_and_hole_size_for_real_photo(self):
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            window = MainWindow()
+            window.cleanup_toggle.setCurrentText("保留原色")
+            self.assertTrue(window.open_image(str(photo)))
+            deadline = time.monotonic() + 20
+            while window.output_generation != window.generation and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.02)
+            self.assertEqual(window.output_generation, window.generation)
+            destination = Path(directory) / "pendant.png"
+            with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName",
+                       return_value=(str(destination), "")), \
+                 patch("lumina_pendant_prep.app.QMessageBox.information") as notice:
+                window.export_png()
+            message = notice.call_args.args[2]
+            self.assertIn("60 × 33.75 mm", message)
+            self.assertIn("挂绳孔直径约 4 mm", message)
+            self.assertIn("目标宽度设为 60 mm", message)
+            self.assertTrue(destination.exists())
+            window.close()
+
     def test_project_relinks_moved_photo_and_preserves_current_image_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
