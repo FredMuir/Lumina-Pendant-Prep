@@ -26,13 +26,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
       - name: Package desktop app
-        run: >-
-          pyinstaller --clean --noconfirm --windowed --onedir
-          --name LuminaPendantPrep
-          --collect-all PySide6
-          --collect-all pillow_heif
-          --collect-all cv2
-          run_app.py
+        run: pyinstaller --clean --noconfirm LuminaPendantPrep.spec
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64

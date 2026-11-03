@@ -35,6 +35,15 @@ python run_app.py
 
 GitHub Actions 当前只在 Windows x64 runner 上构建 Windows 版打包产物。macOS 目标暂缓，待 Windows 功能齐全并通过验证后再启动。
 
+本地生成 Windows 文件夹版（从项目根目录执行）：
+
+```powershell
+python -m pip install -e . pyinstaller
+python -m PyInstaller --clean --noconfirm LuminaPendantPrep.spec
+```
+
+程序位于 `dist/LuminaPendantPrep/LuminaPendantPrep.exe`；运行或复制时需要保留整个 `LuminaPendantPrep` 文件夹。
+
 运行核心和图形界面验证：
 
 ```powershell
