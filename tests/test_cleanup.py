@@ -1,12 +1,31 @@
 import unittest
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-from lumina_pendant_prep.cleanup import CleanupSettings, simplify_image
+from lumina_pendant_prep.cleanup import CleanupSettings, simplify_image, _merge_adjacent_regions
 
 
 class CleanupTests(unittest.TestCase):
+    def test_real_photo_cleanup_produces_valid_limited_palette(self):
+        with Image.open(Path(__file__).parent / "fixtures" / "cat-photo.jpg") as photo:
+            source = photo.convert("RGBA").resize((320, 180), Image.Resampling.LANCZOS)
+        result = simplify_image(source, CleanupSettings())
+        self.assertEqual(result.image.size, source.size)
+        self.assertEqual(result.image.getchannel("A").tobytes(), source.getchannel("A").tobytes())
+        self.assertLessEqual(result.resulting_colors, 32)
+        self.assertGreater(result.original_colors, 1)
+
+    def test_similar_color_merge_is_local_and_respects_transparency(self):
+        labels = np.array([[1, 1, 2, 0, 1, 1, 0, 2]], dtype=np.uint8)
+        visible = np.array([[1, 1, 1, 0, 1, 1, 0, 1]], dtype=bool)
+        labs = {1: np.array([50, 0, 0]), 2: np.array([51, 0, 0])}
+        _merge_adjacent_regions(labels, visible, labs, 2)
+        self.assertEqual(labels[0, :3].tolist(), [1, 1, 1])
+        self.assertEqual(labels[0, 4:6].tolist(), [1, 1])
+        self.assertEqual(labels[0, 7], 2)
+
     def test_transparent_background_does_not_consume_palette_colors(self):
         pixels = np.zeros((100, 100, 4), dtype=np.uint8)
         pixels[10:20, 10:20] = (255, 0, 0, 255)

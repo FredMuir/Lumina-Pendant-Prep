@@ -34,6 +34,60 @@ def _lab_palette(rgb_palette: list[int], used: set[int]) -> dict[int, np.ndarray
     return {index: lab[index] for index in used}
 
 
+def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
+                            labs: dict[int, np.ndarray], threshold: float) -> None:
+    """Merge touching components, never all occurrences of a palette color."""
+    if threshold <= 0 or not labs:
+        return
+    regions = np.zeros(labels.shape, dtype=np.int32)
+    region_colors = [0]
+    region_sizes = [0]
+    for color in sorted(labs):
+        mask = ((labels == color) & visible).astype(np.uint8)
+        count, components, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
+        offset = len(region_colors) - 1
+        selected = components > 0
+        regions[selected] = components[selected] + offset
+        region_colors.extend([color] * (count - 1))
+        region_sizes.extend(stats[1:, cv2.CC_STAT_AREA].tolist())
+
+    count = len(region_colors)
+    parent = list(range(count))
+    edges = []
+    for a, b in ((regions[:, :-1], regions[:, 1:]), (regions[:-1, :], regions[1:, :])):
+        touching = (a != b) & (a != 0) & (b != 0)
+        lo = np.minimum(a[touching], b[touching]).astype(np.uint64)
+        hi = np.maximum(a[touching], b[touching]).astype(np.uint64)
+        if lo.size:
+            keys, contacts = np.unique(lo * np.uint64(count) + hi, return_counts=True)
+            edges.extend((int(key // np.uint64(count)), int(key % np.uint64(count)), int(contact))
+                         for key, contact in zip(keys, contacts))
+
+    def root(value: int) -> int:
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+
+    # Prefer longer shared boundaries. The representative color is that of
+    # the larger accumulated region; ties use component id for determinism.
+    for left, right, _ in sorted(edges, key=lambda edge: (-edge[2], edge[0], edge[1])):
+        left, right = root(left), root(right)
+        if left == right:
+            continue
+        if float(np.linalg.norm(labs[region_colors[left]] - labs[region_colors[right]])) > threshold:
+            continue
+        if (region_sizes[left], -left) < (region_sizes[right], -right):
+            left, right = right, left
+        parent[right] = left
+        region_sizes[left] += region_sizes[right]
+
+    region_remap = np.zeros(count, dtype=np.uint8)
+    for region in range(1, count):
+        region_remap[region] = region_colors[root(region)]
+    labels[visible] = region_remap[regions[visible]]
+
+
 def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResult:
     """Quantize without dithering, merge adjacent similar colors, then absorb tiny islands."""
     if not 2 <= settings.colors <= 256:
@@ -63,45 +117,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
     palette = quantized.getpalette() or []
     labs = _lab_palette(palette, used) if used else {}
 
-    # Merge palette entries only when they share an edge and are perceptually close.
-    links: dict[tuple[int, int], int] = {}
-    edges = (
-        (labels[:, :-1], labels[:, 1:], opaque[:, :-1] & opaque[:, 1:]),
-        (labels[:-1, :], labels[1:, :], opaque[:-1, :] & opaque[1:, :]),
-    )
-    for a, b, edge_mask in edges:
-        first, second = a[edge_mask].astype(np.uint16), b[edge_mask].astype(np.uint16)
-        if first.size:
-            low, high = np.minimum(first, second), np.maximum(first, second)
-            counts = np.bincount((low * 256 + high).astype(np.int32), minlength=65536)
-            for index in np.flatnonzero(counts):
-                left, right = divmod(int(index), 256)
-                if left != right:
-                    links[(left, right)] = links.get((left, right), 0) + int(counts[index])
-    parent = {color: color for color in used}
-    color_counts = np.bincount(labels[opaque], minlength=256)
-
-    def root(value: int) -> int:
-        while parent[value] != value:
-            parent[value] = parent[parent[value]]
-            value = parent[value]
-        return value
-
-    for (left, right), _contact in sorted(links.items()):
-        left_root, right_root = root(left), root(right)
-        if left_root == right_root or left_root not in labs or right_root not in labs:
-            continue
-        delta = float(np.linalg.norm(labs[left_root] - labs[right_root]))
-        if delta <= settings.color_delta:
-            # Keep the dominant palette member; use the lower index for exact ties.
-            if (color_counts[left_root], -left_root) >= (color_counts[right_root], -right_root):
-                parent[right_root] = left_root
-            else:
-                parent[left_root] = right_root
-    remap = np.arange(256, dtype=np.uint8)
-    for color in used:
-        remap[color] = root(color)
-    labels[opaque] = remap[labels[opaque]]
+    _merge_adjacent_regions(labels, opaque, labs, settings.color_delta)
 
     width, height = image.size
     minimum_feature_px = max(1, math.ceil(width / settings.target_width_mm * settings.min_feature_mm))
