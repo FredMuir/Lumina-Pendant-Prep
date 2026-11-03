@@ -225,10 +225,23 @@ class MainWindow(QMainWindow):
         self.highlight_mode.currentIndexChanged.connect(self._refresh_output_canvas)
         headings.addWidget(self.highlight_mode)
         preview_layout.addLayout(headings)
+        zoom_row = QHBoxLayout()
+        zoom_row.addStretch()
+        zoom_row.addWidget(QLabel("结果预览缩放"))
+        self.output_zoom = QComboBox()
+        for label, factor in (("适合窗口", 1), ("2 倍", 2), ("4 倍", 4)):
+            self.output_zoom.addItem(label, factor)
+        zoom_row.addWidget(self.output_zoom)
+        zoom_row.addWidget(QLabel("放大后用滚动条查看"))
+        preview_layout.addLayout(zoom_row)
         panes = QSplitter(Qt.Orientation.Horizontal)
         self.input_canvas = ImageCanvas(interactive=True)
         self.output_canvas = ImageCanvas(interactive=False)
-        panes.addWidget(self.input_canvas); panes.addWidget(self.output_canvas)
+        self.output_scroll = QScrollArea()
+        self.output_scroll.setWidgetResizable(True)
+        self.output_scroll.setWidget(self.output_canvas)
+        self.output_zoom.currentIndexChanged.connect(self._set_output_zoom)
+        panes.addWidget(self.input_canvas); panes.addWidget(self.output_scroll)
         preview_layout.addWidget(panes, 1)
         self.source_info = QLabel("支持 JPEG、PNG、WebP、BMP、TIFF、HEIC/HEIF、AVIF")
         self.source_info.setWordWrap(True)
@@ -257,6 +270,15 @@ class MainWindow(QMainWindow):
         enabled = self.cleanup_toggle.currentIndex() == 0
         self.colors.setEnabled(enabled)
         self.color_delta.setEnabled(enabled)
+
+    def _set_output_zoom(self, *_):
+        factor = self.output_zoom.currentData()
+        if factor == 1:
+            self.output_canvas.setMinimumSize(280, 250)
+        else:
+            viewport = self.output_scroll.viewport().size()
+            self.output_canvas.setMinimumSize(max(280, viewport.width() * factor),
+                                              max(250, viewport.height() * factor))
 
     def _apply_gentle_preset(self):
         widgets = (self.colors, self.color_delta, self.min_feature_mm, self.cleanup_toggle)

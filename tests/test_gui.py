@@ -92,6 +92,14 @@ class GuiSmokeTests(unittest.TestCase):
                 time.sleep(0.02)
             self.assertEqual(window.output_generation, window.generation)
             baseline = window.output.tobytes()
+            window.show()
+            self.app.processEvents()
+            window.output_zoom.setCurrentText("4 倍")
+            self.app.processEvents()
+            self.assertGreater(window.output_scroll.horizontalScrollBar().maximum(), 0)
+            self.assertGreater(window.output_scroll.verticalScrollBar().maximum(), 0)
+            window.output_scroll.horizontalScrollBar().setValue(window.output_scroll.horizontalScrollBar().maximum())
+            window.output_scroll.verticalScrollBar().setValue(window.output_scroll.verticalScrollBar().maximum())
             self.assertIn("量化改变", window.status.text())
             self.assertIn("区域合并改变", window.status.text())
             window.highlight_toggle.setChecked(True)
@@ -102,6 +110,9 @@ class GuiSmokeTests(unittest.TestCase):
             destination = window.write_png(window.output, str(Path(directory) / "result.png"))
             with Image.open(destination) as png:
                 self.assertEqual(png.convert("RGBA").tobytes(), baseline)
+            window.output_zoom.setCurrentText("适合窗口")
+            self.app.processEvents()
+            self.assertEqual(window.output_canvas.minimumWidth(), 280)
             window.close()
 
     def test_new_setting_cancels_obsolete_real_photo_preview(self):
