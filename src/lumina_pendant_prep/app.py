@@ -186,6 +186,7 @@ class MainWindow(QMainWindow):
         self.input_canvas.cropChanged.connect(self._set_crop)
         self.input_canvas.holeMoved.connect(self._set_hole)
         self.input_canvas.polygonChanged.connect(self._set_polygon)
+        self.input_canvas.outlineFinished.connect(lambda: self.crop_tool.setCurrentIndex(0))
         self.crop_tool.currentIndexChanged.connect(
             lambda i: self.input_canvas.set_mode(["crop", "hole", "outline"][i])
         )
@@ -262,10 +263,9 @@ class MainWindow(QMainWindow):
         self._schedule_preview()
 
     def _set_polygon(self, points):
-        if len(points) >= 3:
-            self.polygon = list(points)
-            self._sync_geometry()
-            self._schedule_preview()
+        self.polygon = list(points) if len(points) >= 3 else []
+        self._sync_geometry()
+        self._schedule_preview()
 
     def reset_geometry(self):
         self.crop, self.hole = (0.0, 0.0, 1.0, 1.0), (0.5, 0.12)
@@ -320,6 +320,11 @@ class MainWindow(QMainWindow):
         if self.source is None:
             return
         if self.preview_running:
+            return
+        if self.shape.currentText() == "自定义多边形" and len(self.polygon) < 3:
+            self.prepared = self.output = self.preview_changed = None
+            self.output_canvas.set_image(None)
+            self.status.setText("请用多边形工具至少绘制三个节点，并右键完成轮廓。")
             return
         cleanup, pendant = self._settings()
         job = PreviewJob(self.generation, self.source, cleanup, pendant,
@@ -440,6 +445,9 @@ class MainWindow(QMainWindow):
         self._schedule_preview()
 
     def export_png(self):
+        if self.shape.currentText() == "自定义多边形" and len(self.polygon) < 3:
+            QMessageBox.information(self, "轮廓未完成", "请至少绘制三个节点并右键完成多边形后再导出。")
+            return
         if self.output is None:
             QMessageBox.information(self, "尚无图像", "请先打开一张照片并等待预览完成。")
             return

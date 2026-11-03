@@ -9,6 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 
 from lumina_pendant_prep.app import MainWindow, PreviewJob
 from lumina_pendant_prep.cleanup import CleanupSettings
@@ -20,6 +22,35 @@ class GuiSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_incomplete_polygon_cannot_export_rectangle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sample.png"
+            Image.new("RGB", (40, 40), "red").save(path)
+            window = MainWindow()
+            window.open_image(str(path))
+            window.shape.setCurrentText("自定义多边形")
+            window.timer.stop()
+            window._start_preview()
+            self.assertIsNone(window.output)
+            self.assertIn("三个节点", window.status.text())
+            with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName") as dialog, \
+                 patch("lumina_pendant_prep.app.QMessageBox.information") as notice:
+                window.export_png()
+                dialog.assert_not_called()
+                notice.assert_called_once()
+            window._set_polygon([(0.1, 0.1), (0.9, 0.1), (0.5, 0.9)])
+            window.show()
+            self.app.processEvents()
+            window.crop_tool.setCurrentIndex(2)
+            QTest.mouseClick(window.input_canvas, Qt.MouseButton.LeftButton,
+                             pos=window.input_canvas.rect().center())
+            self.assertEqual(window.polygon, [])
+            self.assertEqual(len(window.input_canvas.polygon), 1)
+            QTest.mouseClick(window.input_canvas, Qt.MouseButton.RightButton,
+                             pos=window.input_canvas.rect().center())
+            self.assertEqual(window.crop_tool.currentIndex(), 0)
+            window.close()
 
     def test_png_export_failure_preserves_existing_file(self):
         with tempfile.TemporaryDirectory() as directory:

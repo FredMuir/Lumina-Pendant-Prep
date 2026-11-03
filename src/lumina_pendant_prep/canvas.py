@@ -17,6 +17,7 @@ class ImageCanvas(QWidget):
     cropChanged = Signal(object)
     holeMoved = Signal(float, float)
     polygonChanged = Signal(object)
+    outlineFinished = Signal()
 
     def __init__(self, interactive: bool = False, parent=None):
         super().__init__(parent)
@@ -29,6 +30,7 @@ class ImageCanvas(QWidget):
         self.hole = (0.5, 0.12)
         self.hole_fraction = 0.07
         self.polygon: list[tuple[float, float]] = []
+        self.drawing_outline = False
         self.drag_start: QPointF | None = None
         self.drag_end: QPointF | None = None
 
@@ -40,11 +42,13 @@ class ImageCanvas(QWidget):
                      hole_fraction: float, polygon: list[tuple[float, float]] | None = None) -> None:
         self.crop, self.hole, self.hole_fraction = crop, hole, hole_fraction
         if polygon is not None:
-            self.polygon = polygon
+            self.polygon = list(polygon)
         self.update()
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
+        if mode == "outline":
+            self.drawing_outline = False
         self.setCursor(Qt.CursorShape.CrossCursor if mode in ("crop", "outline") else Qt.CursorShape.PointingHandCursor)
 
     def _image_rect(self) -> QRectF:
@@ -112,6 +116,7 @@ class ImageCanvas(QWidget):
         if self.mode == "outline" and event.button() == Qt.MouseButton.RightButton:
             self.polygonChanged.emit(list(self.polygon))
             self.set_mode("crop")
+            self.outlineFinished.emit()
             return
         if event.button() != Qt.MouseButton.LeftButton:
             return
@@ -121,6 +126,10 @@ class ImageCanvas(QWidget):
         if self.mode == "hole":
             self.holeMoved.emit(*point)
         elif self.mode == "outline":
+            if not self.drawing_outline:
+                self.polygon = []
+                self.polygonChanged.emit([])
+                self.drawing_outline = True
             self.polygon.append(point)
             self.update()
         else:
