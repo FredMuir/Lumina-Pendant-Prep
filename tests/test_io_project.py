@@ -57,6 +57,13 @@ class ImageAndProjectTests(unittest.TestCase):
             self.assertEqual(load_project(path)["crop"], state["crop"])
             self.assertEqual(load_project(path)["shape"], state["shape"])
 
+    def test_rejects_invalid_project_geometry_before_opening_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bad.lpproj"
+            save_project(path, {"source_path": "photo.png", "crop": [0, 0, 0, 1]})
+            with self.assertRaisesRegex(ValueError, "crop"):
+                load_project(path)
+
 
 if __name__ == "__main__":
     unittest.main()
