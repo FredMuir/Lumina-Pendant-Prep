@@ -1,4 +1,5 @@
 import tempfile
+import shutil
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -6,10 +7,26 @@ from unittest.mock import patch
 from PIL import Image, ImageCms
 
 from lumina_pendant_prep.image_io import open_rgba
-from lumina_pendant_prep.project import load_project, save_project
+from lumina_pendant_prep.project import load_project, save_project, source_path_for_project, resolve_project_source
 
 
 class ImageAndProjectTests(unittest.TestCase):
+    def test_project_and_photo_can_move_together(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / "original"
+            original.mkdir()
+            photo = original / "photo.png"
+            Image.new("RGB", (4, 4), "red").save(photo)
+            project = original / "pendant.lpproj"
+            save_project(project, {"source_path": source_path_for_project(project, photo)})
+            moved = root / "moved"
+            shutil.move(str(original), str(moved))
+            moved_project = moved / project.name
+            source = resolve_project_source(moved_project, load_project(moved_project)["source_path"])
+            self.assertEqual(Path(source), moved / photo.name)
+            self.assertEqual(open_rgba(source).size, (4, 4))
+
     def test_icc_palette_png_preserves_transparency(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "palette.png"

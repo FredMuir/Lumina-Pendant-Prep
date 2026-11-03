@@ -11,6 +11,25 @@ from typing import Any
 PROJECT_VERSION = 1
 
 
+def source_path_for_project(project_path: str | Path, source_path: str | Path) -> str:
+    if not source_path:
+        return ""
+    source = Path(source_path).resolve()
+    try:
+        return str(source.relative_to(Path(project_path).resolve().parent))
+    except ValueError:
+        return str(source)
+
+
+def resolve_project_source(project_path: str | Path, source_path: str) -> str:
+    if not source_path:
+        return ""
+    source = Path(source_path)
+    if not source.is_absolute():
+        source = Path(project_path).resolve().parent / source
+    return str(source)
+
+
 def save_project(path: str | Path, data: dict[str, Any]) -> None:
     payload = {"format": "lumina-pendant-prep", "version": PROJECT_VERSION, **data}
     serialized = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)

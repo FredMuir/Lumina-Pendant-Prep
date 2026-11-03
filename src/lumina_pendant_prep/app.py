@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from .canvas import ImageCanvas
 from .cleanup import CleanupSettings, simplify_image
 from .image_io import open_rgba
-from .project import load_project, save_project
+from .project import load_project, save_project, source_path_for_project, resolve_project_source
 from .render import (PendantSettings, crop_pixel_box, hole_has_clearance, hole_has_opaque_surrounding,
                      make_pendant, pendant_pixel_width)
 
@@ -503,7 +503,9 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(self, "保存项目", "pendant.lpproj", "项目文件 (*.lpproj)")
         if filename:
             try:
-                save_project(filename, self._project_data())
+                data = self._project_data()
+                data["source_path"] = source_path_for_project(filename, data["source_path"])
+                save_project(filename, data)
             except OSError as exc:
                 QMessageBox.critical(self, "保存失败", str(exc))
 
@@ -519,7 +521,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "喷嘴直径已调整",
                                         f"项目原来的喷嘴直径为 {old_nozzle:g} mm，当前使用最接近的 {new_nozzle:.1f} mm。请检查打印设置。")
                 data["nozzle_mm"] = new_nozzle
-            source_path = data.get("source_path", "")
+            source_path = resolve_project_source(filename, data.get("source_path", ""))
             if not source_path or not Path(source_path).exists():
                 QMessageBox.information(self, "原始照片已移动", f"找不到原始照片：{source_path}\n请选择该项目使用的照片。")
                 source_path, _ = QFileDialog.getOpenFileName(
