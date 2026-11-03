@@ -27,7 +27,11 @@ def open_rgba(path: str | Path) -> Image.Image:
     if path.suffix.lower() not in SUPPORTED_SUFFIXES:
         raise ValueError(f"Unsupported image extension: {path.suffix or '(none)'}")
     with Image.open(path) as opened:
-        opened.seek(0)  # Multi-image HEIF/TIFF inputs use their primary/first frame.
+        # Pillow opens TIFF on its first page; pillow-heif opens the HEIF
+        # primary image, which is not necessarily at index zero.
+        frame_count = getattr(opened, "n_frames", 1)
+        frame_index = opened.tell()
+        is_heif = opened.format in ("HEIF", "HEIC")
         image = ImageOps.exif_transpose(opened)
         icc = image.info.get("icc_profile")
         color_status = "assumed_srgb"
@@ -53,5 +57,8 @@ def open_rgba(path: str | Path) -> Image.Image:
         # Never carry an invalid or source-space profile into sRGB output.
         image.info["icc_profile"] = SRGB_PROFILE
         image.info["lpp_color_status"] = color_status
+        image.info["lpp_frame_count"] = frame_count
+        image.info["lpp_frame_index"] = frame_index
+        image.info["lpp_frame_is_primary"] = is_heif
         return image.copy()
 

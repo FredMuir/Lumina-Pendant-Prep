@@ -23,6 +23,22 @@ class GuiSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_multiframe_photo_discloses_selected_primary_or_first_page(self):
+        fixtures = Path(__file__).parent / "fixtures"
+        with Image.open(fixtures / "cat-photo.jpg") as cat, Image.open(fixtures / "flower-photo.jpg") as flower:
+            images = [cat.convert("RGB").resize((160, 120)), flower.convert("RGB").resize((160, 120))]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            heif, tiff = root / "photos.heic", root / "photos.tiff"
+            images[0].save(heif, format="HEIF", save_all=True, append_images=[images[1]], primary_index=1)
+            images[0].save(tiff, format="TIFF", save_all=True, append_images=[images[1]])
+            window = MainWindow()
+            self.assertTrue(window.open_image(str(heif)))
+            self.assertIn("仅加载主图（第 2 张）", window.source_info.text())
+            self.assertTrue(window.open_image(str(tiff)))
+            self.assertIn("仅加载第一页（第 1 张）", window.source_info.text())
+            window.close()
+
     def test_small_window_can_scroll_to_status_with_real_photo(self):
         photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
         window = MainWindow()

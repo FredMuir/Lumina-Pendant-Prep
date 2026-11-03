@@ -342,7 +342,7 @@ class MainWindow(QMainWindow):
         self._history_current = self._project_data()
         self.input_canvas.set_image(image)
         self.input_canvas.set_protected_regions(self.protected_regions)
-        self.source_info.setText(f"{self.source_path.name}  ·  {image.width} × {image.height} px")
+        self._update_status()
         self._update_enabled()
         self._schedule_preview()
         return True
@@ -515,6 +515,11 @@ class MainWindow(QMainWindow):
                       "invalid_icc": "ICC 无法转换，按 sRGB 处理，颜色可能不准确"}.get(color_status)
         if color_note:
             summary += f" · {color_note}"
+        frame_count = self.source.info.get("lpp_frame_count", 1)
+        if frame_count > 1:
+            frame_index = self.source.info.get("lpp_frame_index", 0) + 1
+            kind = "主图" if self.source.info.get("lpp_frame_is_primary") else "第一页"
+            summary += f" · 文件含 {frame_count} 张，仅加载{kind}（第 {frame_index} 张）"
         if min_px < 1:
             summary += " · 特征阈值低于 1 px，请提高输出分辨率或物理特征宽度"
         self.source_info.setText(summary)

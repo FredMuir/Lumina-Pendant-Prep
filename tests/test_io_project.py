@@ -12,6 +12,31 @@ from lumina_pendant_prep.project import load_project, save_project, source_path_
 
 
 class ImageAndProjectTests(unittest.TestCase):
+    def test_multiframe_photo_heif_selects_primary_and_tiff_first_page(self):
+        fixtures = Path(__file__).parent / "fixtures"
+        with Image.open(fixtures / "cat-photo.jpg") as cat, Image.open(fixtures / "flower-photo.jpg") as flower:
+            images = [cat.convert("RGB").resize((160, 120)), flower.convert("RGB").resize((160, 120))]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            heif = root / "photos.heic"
+            images[0].save(heif, format="HEIF", save_all=True, append_images=[images[1]], primary_index=1)
+            with Image.open(heif) as raw:
+                self.assertEqual(raw.n_frames, 2)
+                self.assertEqual(raw.tell(), 1)
+                expected = raw.convert("RGBA")
+            actual = open_rgba(heif)
+            self.assertEqual(actual.info["lpp_frame_count"], 2)
+            self.assertEqual(actual.info["lpp_frame_index"], 1)
+            self.assertTrue(actual.info["lpp_frame_is_primary"])
+            self.assertEqual(actual.tobytes(), expected.tobytes())
+            tiff = root / "photos.tiff"
+            images[0].save(tiff, format="TIFF", save_all=True, append_images=[images[1]])
+            actual = open_rgba(tiff)
+            self.assertEqual(actual.info["lpp_frame_count"], 2)
+            self.assertEqual(actual.info["lpp_frame_index"], 0)
+            self.assertFalse(actual.info["lpp_frame_is_primary"])
+            self.assertEqual(actual.tobytes(), images[0].convert("RGBA").tobytes())
+
     def test_real_photo_format_derivatives_decode_with_consistent_content(self):
         fixture = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
         with Image.open(fixture) as original:
