@@ -39,11 +39,22 @@ def _lab_palette(rgb_palette: list[int], used: set[int]) -> dict[int, np.ndarray
     return {index: lab[index] for index in used}
 
 
+def _lab_distances(labs: dict[int, np.ndarray]) -> np.ndarray:
+    """Cache palette distances; each color pair can occur at many boundaries."""
+    values = np.zeros((256, 3), dtype=np.float32)
+    for color, lab in labs.items():
+        values[color] = lab
+    return np.linalg.norm(values[:, None, :] - values[None, :, :], axis=2)
+
+
 def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
-                            labs: dict[int, np.ndarray], threshold: float) -> None:
+                            labs: dict[int, np.ndarray], threshold: float,
+                            distances: np.ndarray | None = None) -> None:
     """Merge touching components, never all occurrences of a palette color."""
     if threshold <= 0 or not labs:
         return
+    if distances is None:
+        distances = _lab_distances(labs)
     regions = np.zeros(labels.shape, dtype=np.int32)
     region_colors = [0]
     region_sizes = [0]
@@ -80,7 +91,7 @@ def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
         left, right = root(left), root(right)
         if left == right:
             continue
-        if float(np.linalg.norm(labs[region_colors[left]] - labs[region_colors[right]])) > threshold:
+        if float(distances[region_colors[left], region_colors[right]]) > threshold:
             continue
         if (region_sizes[left], -left) < (region_sizes[right], -right):
             left, right = right, left
@@ -121,9 +132,10 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
     original_colors = len(used)
     palette = quantized.getpalette() or []
     labs = _lab_palette(palette, used) if used else {}
+    distances = _lab_distances(labs)
     initial_labels = labels.copy()
 
-    _merge_adjacent_regions(labels, opaque, labs, settings.color_delta)
+    _merge_adjacent_regions(labels, opaque, labs, settings.color_delta, distances)
 
     width, height = image.size
     minimum_feature_px = max(1, math.ceil(width / settings.target_width_mm * settings.min_feature_mm))
@@ -154,16 +166,15 @@ def simplify_image(image: Image.Image, settings: CleanupSettings) -> CleanupResu
                     continue
                 local_opaque = opaque[y0:y1, x0:x1]
                 boundary = (cv2.dilate(component.astype(np.uint8), kernel, iterations=1) > 0) & ~component & local_opaque
-                neighbor_labels, contact = np.unique(labels[y0:y1, x0:x1][boundary], return_counts=True)
-                candidates = [(int(n), int(c)) for n, c in zip(neighbor_labels, contact) if int(n) != color]
+                contact = np.bincount(labels[y0:y1, x0:x1][boundary], minlength=256)
+                contact[color] = 0
+                candidates = [(int(n), int(contact[n])) for n in np.flatnonzero(contact)]
                 if not candidates:
                     continue
-                source_lab = labs.get(color, np.zeros(3, dtype=np.float32))
                 chosen = min(
                     candidates,
                     key=lambda pair: (
-                        float(np.linalg.norm(source_lab - labs.get(pair[0], source_lab)))
-                        / math.sqrt(pair[1]),
+                        float(distances[color, pair[0]]) / math.sqrt(pair[1]),
                         -pair[1],
                         pair[0],
                     ),
