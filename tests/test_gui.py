@@ -43,6 +43,14 @@ class GuiSmokeTests(unittest.TestCase):
             for i, diameter in enumerate((0.2, 0.4, 0.6)):
                 window.nozzle_mm.setCurrentIndex(i)
                 self.assertGreaterEqual(window._settings()[0].min_feature_mm, diameter)
+            window.nozzle_mm.setCurrentIndex(1)
+            window.nozzle_mm.setCurrentIndex(2)
+            window.undo()
+            self.assertEqual(window.nozzle_mm.currentData(), 0.4)
+            self.assertEqual(window._project_data()["nozzle_mm"], 0.4)
+            window.redo()
+            self.assertEqual(window.nozzle_mm.currentData(), 0.6)
+            self.assertEqual(window._project_data()["nozzle_mm"], 0.6)
             window.close()
 
     def test_incomplete_polygon_cannot_export_rectangle(self):
