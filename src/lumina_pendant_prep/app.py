@@ -17,7 +17,7 @@ from .canvas import ImageCanvas
 from .cleanup import CleanupSettings, simplify_image
 from .image_io import open_rgba
 from .project import load_project, save_project
-from .render import PendantSettings, hole_has_clearance, make_pendant
+from .render import PendantSettings, hole_has_clearance, make_pendant, pendant_pixel_width
 
 
 class PreviewSignals(QObject):
@@ -258,8 +258,9 @@ class MainWindow(QMainWindow):
     def _sync_geometry(self):
         if self.source is None:
             return
-        crop_w = max(0.001, self.crop[2] - self.crop[0])
-        fraction = self.hole_mm.value() / self.width_mm.value() * crop_w
+        shape = "Circle" if self.shape.currentText() == "圆形" else "Rectangle"
+        output_width = pendant_pixel_width(self.source.size, self.crop, shape)
+        fraction = self.hole_mm.value() / self.width_mm.value() * output_width / self.source.width
         self.input_canvas.set_geometry(self.crop, self.hole, fraction, self.polygon)
 
     def _settings(self):
@@ -268,7 +269,9 @@ class MainWindow(QMainWindow):
         hole_in_crop = crop_left <= self.hole[0] <= crop_right and crop_top <= self.hole[1] <= crop_bottom
         hx = min(1.0, max(0.0, (self.hole[0] - crop_left) / max(crop_w, 0.001)))
         hy = min(1.0, max(0.0, (self.hole[1] - crop_top) / max(crop_h, 0.001)))
-        effective_width = self.width_mm.value() / max(0.001, crop_w)
+        shape = "Circle" if self.shape.currentText() == "圆形" else "Rectangle"
+        output_width = pendant_pixel_width(self.source.size, self.crop, shape)
+        effective_width = self.width_mm.value() * self.source.width / output_width
         cleanup = CleanupSettings(self.colors.value(), effective_width,
                                   max(self.min_feature_mm.value(), self.nozzle_mm.value()),
                                   self.color_delta.value())
@@ -342,11 +345,12 @@ class MainWindow(QMainWindow):
     def _update_status(self, *_):
         if self.source is None:
             return
-        width_px = round(self.source.width * (self.crop[2] - self.crop[0]))
+        shape = "Circle" if self.shape.currentText() == "圆形" else "Rectangle"
+        width_px = pendant_pixel_width(self.source.size, self.crop, shape)
         physical_width = self.width_mm.value()
         min_px = width_px / self.width_mm.value() * max(self.min_feature_mm.value(), self.nozzle_mm.value())
         name = self.source_path.name if self.source_path else "图像"
-        summary = f"{name} · 裁切宽度约 {physical_width:.1f} mm · 目标最小特征约 {min_px:.1f} px"
+        summary = f"{name} · 成品宽度约 {physical_width:.1f} mm · 目标最小特征约 {min_px:.1f} px"
         if min_px < 1:
             summary += " · 特征阈值低于 1 px，请提高输出分辨率或物理特征宽度"
         self.source_info.setText(summary)

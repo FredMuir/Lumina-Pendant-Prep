@@ -18,6 +18,17 @@ class PendantSettings:
     polygon: tuple[tuple[float, float], ...] = ()
 
 
+def pendant_pixel_width(image_size: tuple[int, int], crop: tuple[float, float, float, float],
+                        shape: str) -> int:
+    width, height = image_size
+    left, top, right, bottom = crop
+    x0 = max(0, min(width - 1, round(left * width)))
+    y0 = max(0, min(height - 1, round(top * height)))
+    x1 = max(x0 + 1, min(width, round(right * width)))
+    y1 = max(y0 + 1, min(height, round(bottom * height)))
+    return min(x1 - x0, y1 - y0) if shape == "Circle" else x1 - x0
+
+
 def hole_has_clearance(image_size: tuple[int, int], settings: PendantSettings,
                        minimum_wall_mm: float = 1.2) -> bool:
     """Return whether the entire round hole plus a material wall fits inside the outline."""
