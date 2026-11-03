@@ -23,6 +23,27 @@ class GuiSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_heic_preview_exports_fully_transparent_hole(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.heic"
+            Image.new("RGB", (96, 64), (70, 130, 190)).save(source, format="HEIF", quality=80)
+            window = MainWindow()
+            self.assertTrue(window.open_image(str(source)))
+            deadline = time.monotonic() + 10
+            while window.output is None and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.02)
+            self.assertIsNotNone(window.output)
+            destination = window.write_png(window.output, str(root / "result.png"))
+            with Image.open(destination) as png:
+                self.assertEqual(png.mode, "RGBA")
+                self.assertEqual(png.size, (96, 64))
+                self.assertEqual(png.getpixel((48, 8))[3], 0)
+                self.assertEqual(png.getpixel((0, 0))[3], 0)
+                self.assertAlmostEqual(png.info["dpi"][0], 40.64, delta=0.1)
+            window.close()
+
     def test_nozzle_choices_and_legacy_project_conversion(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
