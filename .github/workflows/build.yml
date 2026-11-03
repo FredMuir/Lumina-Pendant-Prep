@@ -1,0 +1,51 @@
+name: Build desktop app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows-x64
+            output: dist/LuminaPendantPrep
+          - os: macos-15
+            artifact: macos-arm64
+            output: dist/LuminaPendantPrep.app
+          - os: macos-15-intel
+            artifact: macos-x64
+            output: dist/LuminaPendantPrep.app
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install app and packager
+        run: python -m pip install --upgrade pip && python -m pip install . pyinstaller
+      - name: Package desktop app
+        run: >-
+          pyinstaller --clean --noconfirm --windowed --onedir
+          --name LuminaPendantPrep
+          --collect-all PySide6
+          --collect-all pillow_heif
+          --collect-all cv2
+          run_app.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 14
+
