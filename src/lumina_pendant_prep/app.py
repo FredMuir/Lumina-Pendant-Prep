@@ -122,7 +122,10 @@ class MainWindow(QMainWindow):
         print_group = QGroupBox("打印与色块净化")
         form = QFormLayout(print_group)
         self.width_mm = self._double(60, 1, 300, 0.5)
-        self.nozzle_mm = self._double(0.4, 0.1, 2, 0.05)
+        self.nozzle_mm = QComboBox()
+        for diameter in (0.2, 0.4, 0.6):
+            self.nozzle_mm.addItem(f"{diameter:.1f}", diameter)
+        self.nozzle_mm.setCurrentIndex(1)
         self.min_feature_mm = self._double(0.45, 0, 5, 0.05)
         self.colors = QSpinBox(); self.colors.setRange(2, 128); self.colors.setValue(32)
         self.color_delta = self._double(8, 0, 40, 1)
@@ -195,8 +198,8 @@ class MainWindow(QMainWindow):
                        self.cleanup_toggle):
             signal = widget.valueChanged if isinstance(widget, (QDoubleSpinBox, QSpinBox)) else widget.currentIndexChanged
             signal.connect(self._schedule_preview)
-        self.nozzle_mm.valueChanged.connect(self._update_status)
-        self.nozzle_mm.valueChanged.connect(self._schedule_preview)
+        self.nozzle_mm.currentIndexChanged.connect(self._update_status)
+        self.nozzle_mm.currentIndexChanged.connect(self._schedule_preview)
 
     @staticmethod
     def _double(value: float, minimum: float, maximum: float, step: float) -> QDoubleSpinBox:
@@ -292,7 +295,7 @@ class MainWindow(QMainWindow):
         output_width = pendant_pixel_width(self.source.size, self.crop, shape)
         effective_width = self.width_mm.value() * self.source.width / output_width
         cleanup = CleanupSettings(self.colors.value(), effective_width,
-                                  max(self.min_feature_mm.value(), self.nozzle_mm.value()),
+                                  max(self.min_feature_mm.value(), self.nozzle_mm.currentData()),
                                   self.color_delta.value())
         requested_hole = self.hole_toggle.currentIndex() == 0
         pendant = PendantSettings(
@@ -302,7 +305,7 @@ class MainWindow(QMainWindow):
             hole_enabled=False, hole_x=hx, hole_y=hy,
             hole_diameter_mm=self.hole_mm.value(), polygon=tuple(self.polygon),
         )
-        wall_mm = max(1.2, self.nozzle_mm.value() * 2)
+        wall_mm = max(1.2, self.nozzle_mm.currentData() * 2)
         self.hole_safe = (requested_hole and hole_in_crop
                           and hole_has_clearance(self.source.size, pendant, wall_mm)
                           and hole_has_opaque_surrounding(self.source, pendant, wall_mm))
@@ -351,7 +354,7 @@ class MainWindow(QMainWindow):
             self.status.setText(
                 f"预览就绪 · 调色 {result.original_colors} → {result.resulting_colors} 色 · "
                 f"合并 {result.merged_islands} 个小色岛 · 最小特征约 {result.minimum_feature_px}px "
-                f"(阈值不低于喷嘴 {self.nozzle_mm.value():.2f}mm) · 狭窄区域提示 {result.narrow_features} 个\n"
+                f"(阈值不低于喷嘴 {self.nozzle_mm.currentData():.2f}mm) · 狭窄区域提示 {result.narrow_features} 个\n"
                 f"孔和背景均导出为透明像素。{hole_note}"
             )
         else:
@@ -373,7 +376,7 @@ class MainWindow(QMainWindow):
         shape = "Circle" if self.shape.currentText() == "圆形" else "Rectangle"
         width_px = pendant_pixel_width(self.source.size, self.crop, shape)
         physical_width = self.width_mm.value()
-        min_px = width_px / self.width_mm.value() * max(self.min_feature_mm.value(), self.nozzle_mm.value())
+        min_px = width_px / self.width_mm.value() * max(self.min_feature_mm.value(), self.nozzle_mm.currentData())
         name = self.source_path.name if self.source_path else "图像"
         summary = f"{name} · 成品宽度约 {physical_width:.1f} mm · 目标最小特征约 {min_px:.1f} px"
         if min_px < 1:
@@ -429,7 +432,7 @@ class MainWindow(QMainWindow):
             self.hole = tuple(data.get("hole", self.hole))
             self.polygon = [tuple(point) for point in data.get("polygon", [])]
             self.width_mm.setValue(data.get("target_width_mm", 60))
-            self.nozzle_mm.setValue(data.get("nozzle_mm", 0.4))
+            self.nozzle_mm.setCurrentIndex(self.nozzle_mm.findData(data.get("nozzle_mm", 0.4)))
             self.min_feature_mm.setValue(data.get("min_feature_mm", 0.45))
             self.colors.setValue(data.get("colors", 32))
             self.color_delta.setValue(data.get("color_delta", 8))
@@ -487,7 +490,7 @@ class MainWindow(QMainWindow):
         return {
             "source_path": str(self.source_path) if self.source_path else "",
             "crop": list(self.crop), "hole": list(self.hole),
-            "target_width_mm": self.width_mm.value(), "nozzle_mm": self.nozzle_mm.value(),
+            "target_width_mm": self.width_mm.value(), "nozzle_mm": self.nozzle_mm.currentData(),
             "min_feature_mm": self.min_feature_mm.value(), "colors": self.colors.value(),
             "color_delta": self.color_delta.value(), "cleanup": self.cleanup_toggle.currentIndex() == 0,
             "shape": self.shape.currentText(), "corner_radius_mm": self.corner_mm.value(),
@@ -510,6 +513,12 @@ class MainWindow(QMainWindow):
             return
         try:
             data = load_project(filename)
+            old_nozzle = data.get("nozzle_mm", 0.4)
+            if self.nozzle_mm.findData(old_nozzle) < 0:
+                new_nozzle = min((0.2, 0.4, 0.6), key=lambda value: (abs(value - old_nozzle), -value))
+                QMessageBox.information(self, "喷嘴直径已调整",
+                                        f"项目原来的喷嘴直径为 {old_nozzle:g} mm，当前使用最接近的 {new_nozzle:.1f} mm。请检查打印设置。")
+                data["nozzle_mm"] = new_nozzle
             source_path = data.get("source_path", "")
             if not source_path or not Path(source_path).exists():
                 QMessageBox.information(self, "原始照片已移动", f"找不到原始照片：{source_path}\n请选择该项目使用的照片。")

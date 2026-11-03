@@ -23,6 +23,28 @@ class GuiSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_nozzle_choices_and_legacy_project_conversion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            photo = root / "photo.png"
+            Image.new("RGB", (40, 40), "red").save(photo)
+            project = root / "old.lpproj"
+            save_project(project, {"source_path": str(photo), "nozzle_mm": 0.55})
+            window = MainWindow()
+            self.assertEqual([window.nozzle_mm.itemData(i) for i in range(window.nozzle_mm.count())],
+                             [0.2, 0.4, 0.6])
+            self.assertEqual(window.nozzle_mm.currentData(), 0.4)
+            with patch("lumina_pendant_prep.app.QFileDialog.getOpenFileName", return_value=(str(project), "")), \
+                 patch("lumina_pendant_prep.app.QMessageBox.information") as notice:
+                window.load_project_dialog()
+                notice.assert_called_once()
+            self.assertEqual(window.nozzle_mm.currentData(), 0.6)
+            self.assertEqual(window._project_data()["nozzle_mm"], 0.6)
+            for i, diameter in enumerate((0.2, 0.4, 0.6)):
+                window.nozzle_mm.setCurrentIndex(i)
+                self.assertGreaterEqual(window._settings()[0].min_feature_mm, diameter)
+            window.close()
+
     def test_incomplete_polygon_cannot_export_rectangle(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sample.png"
