@@ -512,6 +512,9 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(self, "导出透明 PNG", default, "PNG 图像 (*.png)")
         if not filename:
             return
+        if self._is_source_path(self._png_path(filename)):
+            QMessageBox.critical(self, "无法导出", "导出路径与原照片相同，请选择其他文件名。")
+            return
         try:
             filename = self.write_png(self.output, filename)
             QMessageBox.information(self, "已导出", f"透明 PNG 已保存：\n{filename}")
@@ -519,10 +522,26 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "导出失败", str(exc))
 
     @staticmethod
-    def write_png(image: Image.Image, filename: str) -> str:
+    def _png_path(filename: str) -> Path:
         path = Path(filename)
         if path.suffix.lower() != ".png":
             path = path.with_suffix(path.suffix + ".png" if path.suffix else ".png")
+        return path
+
+    def _is_source_path(self, path: Path) -> bool:
+        if self.source_path is None:
+            return False
+        try:
+            if path.resolve() == self.source_path.resolve():
+                return True
+            return path.exists() and self.source_path.exists() and path.samefile(self.source_path)
+        except OSError:
+            # Do not write if a filesystem error prevents a safe comparison.
+            return True
+
+    @staticmethod
+    def write_png(image: Image.Image, filename: str) -> str:
+        path = MainWindow._png_path(filename)
         temporary = None
         try:
             with tempfile.NamedTemporaryFile(mode="w+b", dir=path.parent,
@@ -554,6 +573,9 @@ class MainWindow(QMainWindow):
     def save_project_dialog(self):
         filename, _ = QFileDialog.getSaveFileName(self, "保存项目", "pendant.lpproj", "项目文件 (*.lpproj)")
         if filename:
+            if self._is_source_path(Path(filename)):
+                QMessageBox.critical(self, "无法保存项目", "项目路径与原照片相同，请选择其他文件名。")
+                return
             try:
                 data = self._project_data()
                 data["source_path"] = source_path_for_project(filename, data["source_path"])

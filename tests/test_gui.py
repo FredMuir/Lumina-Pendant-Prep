@@ -217,6 +217,41 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), b"previous image")
             self.assertEqual(list(root.iterdir()), [path])
 
+    def test_cannot_overwrite_real_source_photo_with_export_or_project(self):
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "photo.png"
+            with Image.open(photo) as original:
+                original.resize((320, 180), Image.Resampling.LANCZOS).save(source)
+            original_bytes = source.read_bytes()
+            window = MainWindow()
+            self.assertTrue(window.open_image(str(source)))
+            window.timer.stop()
+            window.output = window.source.copy()
+            window.output_generation = window.generation
+            # The extension added by the PNG writer must be considered too.
+            with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName",
+                       return_value=(str(source.with_suffix("")), "")), \
+                 patch("lumina_pendant_prep.app.QMessageBox.critical") as error:
+                window.export_png()
+                error.assert_called_once()
+            self.assertEqual(source.read_bytes(), original_bytes)
+            with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName",
+                       return_value=(str(source), "")), \
+                 patch("lumina_pendant_prep.app.QMessageBox.critical") as error:
+                window.save_project_dialog()
+                error.assert_called_once()
+            self.assertEqual(source.read_bytes(), original_bytes)
+            alias = root / "alias.png"
+            try:
+                os.link(source, alias)
+            except OSError:
+                pass  # Some filesystems do not support hard links.
+            else:
+                self.assertTrue(window._is_source_path(alias))
+            window.close()
+
     def test_project_relinks_moved_photo_and_preserves_current_image_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
