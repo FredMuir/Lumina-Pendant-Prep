@@ -45,6 +45,8 @@ python -m unittest discover -s tests -p test_real_heic_optional.py -v
 
 ## 对照和度量
 
+针对 Lumina-Layers 上游提交 `1308c06fc69915e11ead7dbefa0c1e7da11504d0` 的[光栅图像处理代码](https://github.com/lumina-layer-studio/Lumina-Layers/blob/1308c06fc69915e11ead7dbefa0c1e7da11504d0/core/image_processing.py)，高保真路径按 10 px/mm、最近邻缩放，透明像素判断为 alpha 小于 10。项目测试用两张实拍照片、30/60 mm 宽度检查 PNG 经此采样后的孔心、角点及主体透明状态。这是按该版本采样规则做的兼容性检查，并未运行 Lumina、检验轮廓尺寸或生成 3MF；Lumina 的其他版本、模式及材料处理需单独验证。
+
 所有比较保持裁切、成品宽度、喷嘴、材料、Lumina 版本与配置一致；保存原文件、参数、输出 PNG、对应项目和软件版本。原图组采用相同裁切与孔设置但关闭净化；如果当前界面不能真正关闭净化，先补充该基线功能或通过可靠的对照流程实现，不把最低强度当作无处理。
 
 - 报告有色区域的连通色岛数量、低于指定物理面积的色岛数量和面积占比；记录像素密度、连通规则、颜色标签方法和透明边界处理。对 Lumina 输出也尽可能采用相同定义统计，不能跨不同标签定义直接比较。
