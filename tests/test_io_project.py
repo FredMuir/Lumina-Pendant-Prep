@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 from PIL import Image, ImageCms
 
 from lumina_pendant_prep.image_io import open_rgba
@@ -11,6 +12,53 @@ from lumina_pendant_prep.project import load_project, save_project, source_path_
 
 
 class ImageAndProjectTests(unittest.TestCase):
+    def test_real_photo_format_derivatives_decode_with_consistent_content(self):
+        fixture = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with Image.open(fixture) as original:
+            photo = original.convert("RGB").resize((320, 180), Image.Resampling.LANCZOS)
+        baseline = np.asarray(photo, dtype=np.int16)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            formats = (("jpg", "JPEG"), ("png", "PNG"), ("webp", "WEBP"),
+                       ("bmp", "BMP"), ("tif", "TIFF"), ("heic", "HEIF"),
+                       ("heif", "HEIF"), ("avif", "AVIF"))
+            for suffix, format_name in formats:
+                with self.subTest(suffix=suffix):
+                    path = root / f"photo.{suffix}"
+                    photo.save(path, format=format_name)
+                    decoded = open_rgba(path)
+                    self.assertEqual(decoded.size, photo.size)
+                    self.assertEqual(decoded.mode, "RGBA")
+                    self.assertEqual(decoded.getchannel("A").getextrema(), (255, 255))
+                    difference = np.abs(np.asarray(decoded.convert("RGB"), dtype=np.int16) - baseline)
+                    self.assertLess(float(difference.mean()), 15.0)
+
+    def test_real_photo_exif_orientation_and_transparent_png(self):
+        fixture = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with Image.open(fixture) as original:
+            photo = original.convert("RGB").resize((320, 180), Image.Resampling.LANCZOS)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            oriented = root / "rotated.jpg"
+            exif = Image.Exif()
+            exif[274] = 6
+            photo.save(oriented, exif=exif, quality=95)
+            result = open_rgba(oriented)
+            self.assertEqual(result.size, (180, 320))
+            # Compare with the actual decoded JPEG rotated clockwise, avoiding
+            # assumptions about lossy JPEG compression.
+            with Image.open(oriented) as raw:
+                expected = raw.convert("RGBA").transpose(Image.Transpose.ROTATE_270)
+            self.assertEqual(result.tobytes(), expected.tobytes())
+            rgba = photo.convert("RGBA")
+            rgba.putalpha(Image.new("L", photo.size, 180))
+            rgba.putpixel((5, 5), (*rgba.getpixel((5, 5))[:3], 0))
+            transparent = root / "transparent.png"
+            profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+            rgba.save(transparent, icc_profile=profile)
+            loaded = open_rgba(transparent)
+            self.assertEqual(loaded.getchannel("A").tobytes(), rgba.getchannel("A").tobytes())
+
     def test_project_and_photo_can_move_together(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

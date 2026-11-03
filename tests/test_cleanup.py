@@ -9,16 +9,19 @@ from lumina_pendant_prep.cleanup import CleanupSettings, simplify_image, _merge_
 
 class CleanupTests(unittest.TestCase):
     def test_real_photo_cleanup_produces_valid_limited_palette(self):
-        with Image.open(Path(__file__).parent / "fixtures" / "cat-photo.jpg") as photo:
-            source = photo.convert("RGBA").resize((320, 180), Image.Resampling.LANCZOS)
-        result = simplify_image(source, CleanupSettings())
-        self.assertEqual(result.image.size, source.size)
-        self.assertEqual(result.image.getchannel("A").tobytes(), source.getchannel("A").tobytes())
-        self.assertLessEqual(result.resulting_colors, 32)
-        self.assertGreater(result.original_colors, 1)
-        self.assertGreater(result.quantized_pixels, 0)
-        self.assertEqual(result.quantized_pixels, np.count_nonzero(np.asarray(result.quantized_mask)))
-        self.assertEqual(result.merged_pixels, np.count_nonzero(np.asarray(result.merged_mask)))
+        for name in ("cat-photo.jpg", "flower-photo.jpg"):
+            with self.subTest(photo=name):
+                with Image.open(Path(__file__).parent / "fixtures" / name) as photo:
+                    source = photo.convert("RGBA")
+                    source.thumbnail((320, 320), Image.Resampling.LANCZOS)
+                result = simplify_image(source, CleanupSettings())
+                self.assertEqual(result.image.size, source.size)
+                self.assertEqual(result.image.getchannel("A").tobytes(), source.getchannel("A").tobytes())
+                self.assertLessEqual(result.resulting_colors, 32)
+                self.assertGreater(result.original_colors, 1)
+                self.assertGreater(result.quantized_pixels, 0)
+                self.assertEqual(result.quantized_pixels, np.count_nonzero(np.asarray(result.quantized_mask)))
+                self.assertEqual(result.merged_pixels, np.count_nonzero(np.asarray(result.merged_mask)))
 
     def test_merge_mask_distinguishes_region_merge_from_quantization(self):
         source = Image.new("RGBA", (10, 10), (220, 25, 30, 255))
