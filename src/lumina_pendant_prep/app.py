@@ -314,6 +314,7 @@ class MainWindow(QMainWindow):
             signal.connect(self._schedule_preview)
         self.nozzle_mm.currentIndexChanged.connect(self._update_status)
         self.nozzle_mm.currentIndexChanged.connect(self._schedule_preview)
+        self.resolution.currentIndexChanged.connect(self._update_status)
 
     def _update_cleanup_controls(self, *_):
         enabled = self.cleanup_toggle.currentIndex() == 0
@@ -534,6 +535,7 @@ class MainWindow(QMainWindow):
         if self.source is not None:
             self._record_history()
             self._sync_geometry()
+            self._update_status()
             self.generation += 1
             if self.active_job is not None:
                 self.active_job.cancel()
@@ -614,11 +616,16 @@ class MainWindow(QMainWindow):
         if self.source is None:
             return
         shape = "Circle" if self.shape.currentText() == "圆形" else "Rectangle"
-        width_px = pendant_pixel_width(self.source.size, self.crop, shape)
+        image_size = self.source.size
+        limit = self.resolution.currentData()
+        if limit and max(image_size) > limit:
+            ratio = limit / max(image_size)
+            image_size = (max(1, round(image_size[0] * ratio)), max(1, round(image_size[1] * ratio)))
+        width_px = pendant_pixel_width(image_size, self.crop, shape)
         physical_width = self.width_mm.value()
         min_px = width_px / self.width_mm.value() * max(self.min_feature_mm.value(), self.nozzle_mm.currentData())
         name = self.source_path.name if self.source_path else "图像"
-        summary = f"{name} · 成品宽度约 {physical_width:.1f} mm · 目标最小特征约 {min_px:.1f} px"
+        summary = f"{name} · 处理尺寸 {image_size[0]} × {image_size[1]} px · 照片宽度约 {physical_width:.1f} mm · 目标最小特征约 {min_px:.1f} px"
         color_status = self.source.info.get("lpp_color_status")
         color_note = {"converted_srgb": "ICC 已转换为 sRGB",
                       "assumed_srgb": "无 ICC，按 sRGB 处理",

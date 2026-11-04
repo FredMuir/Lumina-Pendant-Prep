@@ -20,6 +20,8 @@ class LocalPhotoTest(unittest.TestCase):
             self.assertFalse(window.processing_toggle.isChecked())
             self.assertFalse(window.timer.isActive())
             self.assertIsNone(window.output)
+            if window.source.size == (5712, 4284):
+                self.assertIn("处理尺寸 2400 × 1800 px", window.source_info.text())
             window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 180
             while window.output_generation != window.generation and time.monotonic() < deadline:

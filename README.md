@@ -31,7 +31,7 @@
 
 ## Windows 开发环境
 
-双击桌面的“Lumina Pendant Prep”快捷方式，或项目内的 `启动 Lumina Pendant Prep.cmd`，启动本机已安装的版本。快捷方式指向固定的 `dist/LuminaPendantPrep` 目录；以后更新源码后可运行 `scripts/build_windows.ps1` 构建、验证并替换本地版本。启动器不自动下载网络更新。
+双击桌面的“Lumina Pendant Prep”快捷方式，或项目内的 `启动 Lumina Pendant Prep.cmd`，启动本机已安装的版本。版本安装在本机用户目录，由版本指针选择当前版本；以后更新源码后可运行 `scripts/build_windows.ps1` 构建、验证并替换本地版本。启动器不自动下载网络更新。
 
 需要 Python 3.10 或更新版本。当前首发开发与验证环境为 Windows：
 
