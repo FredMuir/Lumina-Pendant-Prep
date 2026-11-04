@@ -34,7 +34,7 @@
 ### 当前试用版后续重点
 
 - **明确处理确认**：打开图片或更改任一处理参数均不自动运行；待处理提示、取消、连续修改和旧预览导出保护须覆盖自动测试。
-- **浮雕高度图**：参考 [Lumina Studio 浮雕文档](https://wiki.luminastudio.com.cn/zh/docs/reference/model-features/relief/)及 [高度图读取源码](https://github.com/lumina-layer-studio/Lumina-Layers/blob/main/core/heightmap_loader.py)，在彩色图片建立预览后上传独立高度图；黑色对应最低、白色对应最高。现使用 [Depth Anything V2 Small](https://github.com/DepthAnything/Depth-Anything-V2) 本地估计原照片相对深度，输出与彩色图同尺寸的 8 位灰度 PNG，提供近高/远高选择和单独预览；并非真实测距。高度图透明区域和孔写成黑色，实际轮廓与孔由彩色输入 alpha 控制，仍需端到端确认；高度上限由 Lumina 设定。
+- **浮雕高度图**：参考 [Lumina Studio 浮雕文档](https://wiki.luminastudio.com.cn/zh/docs/reference/model-features/relief/)及 [高度图读取源码](https://github.com/lumina-layer-studio/Lumina-Layers/blob/main/core/heightmap_loader.py)，在彩色图片建立预览后上传独立高度图；黑色对应最低、白色对应最高。现使用 [Depth Anything V2 Small](https://github.com/DepthAnything/Depth-Anything-V2) 本地估计原照片相对深度，输出与彩色图同尺寸的 8 位灰度 PNG，提供近高/远高选择和单独预览；外边框和孔边框可统一选择最高或最低，不随深度强度变化；并非真实测距。高度图透明区域和孔写成黑色，实际轮廓与孔由彩色输入 alpha 控制，仍需端到端确认；高度上限由 Lumina 设定。
 
 1. **安装与升级**：提供可卸载的 Windows x64 安装程序、明确版本及校验值；验证全新安装、覆盖升级、卸载和开始菜单启动。公开版先由用户手动下载更新；后续再评估签名和自动更新。
 2. **大图可靠性**：扩充原生 HEIC 实拍样本，记录解码错误、处理时间和内存峰值；验证不同分辨率下的取消、重新处理与导出一致性。用户照片不进入仓库或遥测。

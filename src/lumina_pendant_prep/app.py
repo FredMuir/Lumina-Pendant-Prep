@@ -136,10 +136,11 @@ class DepthJob(QRunnable):
             if source.size != self.processed_size:
                 source = source.resize(self.processed_size, Image.Resampling.LANCZOS)
             depth = estimate_relative_depth(source, self.cancel_requested.is_set)
-            result = align_depth(depth, self.output, self.pendant)
+            _, border_mask = make_pendant(source, self.pendant, return_border_mask=True)
+            result = align_depth(depth, self.output, self.pendant, border_mask)
             if self.cancel_requested.is_set():
                 raise InterruptedError()
-            self.signals.finished.emit(self.generation, result)
+            self.signals.finished.emit(self.generation, (result, border_mask))
         except InterruptedError:
             self.signals.cancelled.emit(self.generation)
         except Exception as exc:
@@ -173,6 +174,7 @@ class MainWindow(QMainWindow):
         self.pending_start = False
         self.preview_pendant: PendantSettings | None = None
         self.depth_raw: Image.Image | None = None
+        self.depth_border_mask: Image.Image | None = None
         self.depth_generation = -1
         self.depth_job: DepthJob | None = None
         self.depth_dialog: QDialog | None = None
@@ -283,6 +285,9 @@ class MainWindow(QMainWindow):
         self.heightmap_enabled = QCheckBox("启用 AI 深度高度图")
         self.heightmap_direction = QComboBox()
         self.heightmap_direction.addItems(["近处凸起", "远处凸起"])
+        self.heightmap_border = QComboBox()
+        self.heightmap_border.addItems(["最低（黑色）", "最高（白色）"])
+        self.heightmap_border.setToolTip("统一设置外边框和孔边框的高度，不受深度方向或强度影响；透明孔保持黑色。")
         self.heightmap_strength = QSpinBox(); self.heightmap_strength.setRange(0, 200); self.heightmap_strength.setValue(100); self.heightmap_strength.setSuffix("%")
         self.heightmap_strength.setToolTip("按比例调整相对深度：超过 100% 可能截断高值；最终毫米高度由 Lumina 设置。")
         self.heightmap_generate_button = QPushButton("生成 AI 深度图")
@@ -294,9 +299,11 @@ class MainWindow(QMainWindow):
         self.heightmap_enabled.toggled.connect(self._heightmap_options_changed)
         self.heightmap_direction.currentIndexChanged.connect(self._heightmap_options_changed)
         self.heightmap_strength.valueChanged.connect(self._heightmap_options_changed)
+        self.heightmap_border.currentIndexChanged.connect(self._heightmap_options_changed)
         height_form.addRow(self.heightmap_enabled)
         height_form.addRow("高度方向", self.heightmap_direction)
         height_form.addRow("高度图强度", self.heightmap_strength)
+        height_form.addRow("边框高度", self.heightmap_border)
         height_form.addRow(self.heightmap_generate_button)
         height_form.addRow(self.heightmap_preview_button)
         height_form.addRow(self.heightmap_export_button)
@@ -465,6 +472,7 @@ class MainWindow(QMainWindow):
             self.depth_job.cancel()
         self.heightmap_direction.setEnabled(enabled)
         self.heightmap_strength.setEnabled(enabled)
+        self.heightmap_border.setEnabled(enabled)
         ready = self.depth_raw is not None and self.depth_generation == self.generation
         self.heightmap_generate_button.setEnabled(enabled and self.depth_job is None)
         self.heightmap_preview_button.setEnabled(enabled and ready)
@@ -1029,6 +1037,7 @@ class MainWindow(QMainWindow):
             self.heightmap_enabled.setChecked(data.get("heightmap_enabled", False))
             self.heightmap_direction.setCurrentIndex(1 if data.get("heightmap_far_high", False) else 0)
             self.heightmap_strength.setValue(data.get("heightmap_strength_percent", 100))
+            self.heightmap_border.setCurrentIndex(1 if data.get("heightmap_border_high", False) else 0)
             self._heightmap_options_changed()
             self._update_border_buttons()
         finally:
@@ -1086,6 +1095,7 @@ class MainWindow(QMainWindow):
         if self.depth_job is not None:
             self.depth_job.cancel()
         self.depth_raw = None
+        self.depth_border_mask = None
         self.depth_generation = -1
         if self.depth_view is not None:
             self.depth_view.set_image(None)
@@ -1116,7 +1126,7 @@ class MainWindow(QMainWindow):
         if generation != self.generation or self.output is None:
             self._heightmap_options_changed()
             return
-        self.depth_raw = depth
+        self.depth_raw, self.depth_border_mask = depth
         self.depth_generation = generation
         self.depth_status.setText("AI 相对深度已生成；请检查物体前后关系。")
         self._heightmap_options_changed()
@@ -1135,7 +1145,8 @@ class MainWindow(QMainWindow):
 
     def _current_depth_heightmap(self):
         return depth_heightmap(self.depth_raw, self.output, self.heightmap_direction.currentIndex() == 1,
-                               self.heightmap_strength.value() / 100.0)
+                               self.heightmap_strength.value() / 100.0, self.depth_border_mask,
+                               self.heightmap_border.currentIndex() == 1)
 
     def show_depth_preview(self):
         if self.depth_raw is None or self.depth_generation != self.generation:
@@ -1260,6 +1271,7 @@ class MainWindow(QMainWindow):
             "heightmap_enabled": self.heightmap_enabled.isChecked(),
             "heightmap_far_high": self.heightmap_direction.currentIndex() == 1,
             "heightmap_strength_percent": self.heightmap_strength.value(),
+            "heightmap_border_high": self.heightmap_border.currentIndex() == 1,
         }
 
     def save_project_dialog(self):

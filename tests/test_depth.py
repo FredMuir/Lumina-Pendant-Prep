@@ -34,6 +34,29 @@ class DepthTests(unittest.TestCase):
         self.assertGreater(area(.52, .32), area(.31, .08))  # Cat is in front of building.
         self.assertGreater(area(.70, .74), area(.52, .32))  # Foreground cloth is nearer than cat.
 
+    def test_border_heights_are_absolute_and_hole_remains_clear(self):
+        image = Image.new("RGBA", (320, 180), (255, 255, 255, 255))
+        image.putpixel((160, 90), (255, 255, 255, 0))
+        depth = np.tile(np.linspace(0, 1, image.width, dtype=np.float32), (image.height, 1))
+        for shape in ("Rounded rectangle", "Circle", "Rectangle"):
+            for outer, hole in ((True, False), (False, True), (True, True)):
+                settings = PendantSettings(crop=(0, 0, 1, 1), shape=shape, target_width_mm=60, outer_border_enabled=outer,
+                    outer_border_mm=2, hole_enabled=True, hole_border_enabled=hole,
+                    hole_border_mm=.5, hole_x=.5, hole_y=.25, hole_diameter_mm=8)
+                color, mask = make_pendant(image, settings, return_border_mask=True)
+                aligned = align_depth(depth, color, settings, mask)
+                border = np.asarray(mask) > 0
+                alpha = np.asarray(color.getchannel("A"))
+                self.assertGreater(border.sum(), 0)
+                for far_high in (False, True):
+                    for strength in (0, .5, 2):
+                        for high in (False, True):
+                            result = np.asarray(depth_heightmap(aligned, color, far_high, strength, mask, high))
+                            self.assertTrue(np.all(result[border & (alpha > 0)] == (255 if high else 0)))
+                            self.assertTrue(np.all(result[alpha == 0] == 0))
+                # Photograph pixels matching the border color are not considered borders.
+                self.assertEqual(mask.getpixel((color.width // 2 - 20, color.height // 2)), 0)
+
     def test_alignment_hole_border_and_direction(self):
         photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
         with Image.open(photo) as opened:

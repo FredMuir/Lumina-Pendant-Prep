@@ -53,7 +53,7 @@ def estimate_relative_depth(image: Image.Image, cancelled=None) -> np.ndarray:
     return cv2.resize(depth, (w, h), interpolation=cv2.INTER_CUBIC)
 
 
-def align_depth(depth: np.ndarray, color: Image.Image, settings) -> Image.Image:
+def align_depth(depth: np.ndarray, color: Image.Image, settings, border_mask=None) -> Image.Image:
     """Crop/pad depth to the processed color output and normalize visible content."""
     h, w = depth.shape
     x0, y0, x1, y1 = crop_pixel_box((w, h), settings.crop)
@@ -69,6 +69,11 @@ def align_depth(depth: np.ndarray, color: Image.Image, settings) -> Image.Image:
     alpha = np.asarray(color.convert("RGBA").getchannel("A"), dtype=np.uint8)
     content_alpha = alpha[pad_y:pad_y + cropped.shape[0], pad_x:pad_x + cropped.shape[1]]
     valid = (content_alpha > 0) & np.isfinite(cropped)
+    if border_mask is not None:
+        if border_mask.size != color.size:
+            raise ValueError("边框蒙版尺寸不一致。")
+        borders = np.asarray(border_mask, dtype=np.uint8)
+        valid &= borders[pad_y:pad_y + cropped.shape[0], pad_x:pad_x + cropped.shape[1]] == 0
     if not np.any(valid):
         raise ValueError("图片没有可用于高度图的不透明区域。")
     low, high = np.percentile(cropped[valid], [2, 98])
@@ -81,7 +86,8 @@ def align_depth(depth: np.ndarray, color: Image.Image, settings) -> Image.Image:
     return result
 
 
-def depth_heightmap(depth: Image.Image, color: Image.Image, far_high: bool, strength: float) -> Image.Image:
+def depth_heightmap(depth: Image.Image, color: Image.Image, far_high: bool, strength: float,
+                    border_mask=None, border_high=False) -> Image.Image:
     if depth.size != color.size or not 0 <= strength <= 2:
         raise ValueError("高度图尺寸或强度无效。")
     image = depth.convert("L")
@@ -90,6 +96,13 @@ def depth_heightmap(depth: Image.Image, color: Image.Image, far_high: bool, stre
     if strength != 1:
         image = image.point(lambda value: min(255, round(value * strength)))
     result = ImageChops.multiply(image, color.convert("RGBA").getchannel("A"))
+    if border_mask is not None:
+        if border_mask.size != color.size:
+            raise ValueError("边框蒙版尺寸不一致。")
+        # Border height is absolute: it is not affected by depth direction or strength.
+        mask = ImageChops.multiply(border_mask.point(lambda value: 255 if value else 0),
+                                   color.convert("RGBA").getchannel("A").point(lambda value: 255 if value else 0))
+        result.paste(255 if border_high else 0, mask=mask)
     result.info.clear()
     result.info["dpi"] = color.info.get("dpi", (300, 300))
     return result

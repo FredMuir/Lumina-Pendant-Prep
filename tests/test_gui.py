@@ -240,6 +240,8 @@ class GuiSmokeTests(unittest.TestCase):
             root = Path(directory)
             window = MainWindow()
             window.cleanup_toggle.setCurrentText("保留原色")
+            window.outer_border_toggle.setChecked(True)
+            window.hole_border_toggle.setChecked(True)
             self.assertTrue(window.open_image(str(photo)))
             window.processing_toggle.click()
             deadline = time.monotonic() + 20
@@ -257,6 +259,7 @@ class GuiSmokeTests(unittest.TestCase):
             raw_depth = window.depth_raw
             window.heightmap_direction.setCurrentIndex(1)
             window.heightmap_strength.setValue(50)
+            window.heightmap_border.setCurrentIndex(1)
             window.preview_kind.setCurrentText("高度图")
             self.assertEqual(window.output_generation, window.generation)
             self.assertIs(window.depth_raw, raw_depth)
@@ -269,14 +272,19 @@ class GuiSmokeTests(unittest.TestCase):
                 self.assertEqual(result.size, window.output.size)
                 self.assertEqual(result.getpixel((0, 0)), 0)
                 self.assertNotIn("icc_profile", result.info)
+                import numpy as np
+                border = np.asarray(window.depth_border_mask) > 0
+                self.assertTrue(np.all(np.asarray(result)[border] == 255))
                 x, y = result.width // 2, result.height // 2
                 self.assertEqual(window.output_canvas.image.pixelColor(x, y).red(), result.getpixel((x, y)))
             self.assertTrue(window._project_data()["heightmap_enabled"])
             self.assertTrue(window._project_data()["heightmap_far_high"])
             self.assertEqual(window._project_data()["heightmap_strength_percent"], 50)
+            self.assertTrue(window._project_data()["heightmap_border_high"])
             self.assertEqual([p.name for p in root.iterdir()], ["height.png"])
             self.assertTrue(window.open_image(str(Path(__file__).parent / "fixtures" / "cat-photo.jpg")))
             self.assertIsNone(window.depth_raw)
+            self.assertIsNone(window.depth_border_mask)
             self.assertIsNone(window.depth_view.image)
             self.assertFalse(window.depth_dialog.isVisible())
             self.assertEqual([p.name for p in root.iterdir()], ["height.png"])

@@ -122,7 +122,7 @@ def hole_has_opaque_surrounding(image: Image.Image, settings: PendantSettings,
     return ImageChops.multiply(ImageChops.invert(alpha), disk).getbbox() is None
 
 
-def make_pendant(image: Image.Image, settings: PendantSettings) -> Image.Image:
+def make_pendant(image: Image.Image, settings: PendantSettings, *, return_border_mask=False):
     width, height = image.size
     x0, y0, x1, y1 = crop_pixel_box(image.size, settings.crop)
     source_crop = image.convert("RGBA").crop((x0, y0, x1, y1))
@@ -178,9 +178,12 @@ def make_pendant(image: Image.Image, settings: PendantSettings) -> Image.Image:
         if ring is not None:
             ring = ring.resize((w, h), Image.Resampling.BOX)
     cropped.putalpha(ImageChops.multiply(cropped.getchannel("A"), mask))
+    border_mask = Image.new("L", (w, h), 0) if return_border_mask else None
     if ring is not None:
         # The ring lies entirely in the removed hole, preserving picture pixels.
         ring = ImageChops.multiply(ring, mask.point(lambda value: 255 if value == 0 else 0))
+        if return_border_mask:
+            border_mask = ring.copy()
         color = Image.new("RGBA", cropped.size, ImageColor.getrgb(settings.hole_border_color) + (0,))
         color.putalpha(ring)
         cropped = Image.alpha_composite(cropped, color)
@@ -208,11 +211,15 @@ def make_pendant(image: Image.Image, settings: PendantSettings) -> Image.Image:
         else:
             distance = cv2.distanceTransform((expanded == 0).astype(np.uint8), cv2.DIST_L2, 5)
             outside = ((expanded == 0) & (distance <= pad)).astype(np.uint8) * 255
+        if return_border_mask:
+            padded_border_mask = Image.new("L", (w + 2 * pad, h + 2 * pad), 0)
+            padded_border_mask.paste(border_mask, (pad, pad))
+            border_mask = ImageChops.lighter(padded_border_mask, Image.fromarray(outside, "L"))
         background = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), ImageColor.getrgb(settings.outer_border_color) + (0,))
         background.putalpha(Image.fromarray(outside, "L"))
         background.alpha_composite(cropped, (pad, pad))
         cropped = background
     dpi = 25.4 * w / settings.target_width_mm if settings.target_width_mm > 0 else 300
     cropped.info["dpi"] = (dpi, dpi)
-    return cropped
+    return (cropped, border_mask) if return_border_mask else cropped
 
