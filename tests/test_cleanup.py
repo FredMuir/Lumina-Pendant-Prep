@@ -8,6 +8,23 @@ from lumina_pendant_prep.cleanup import CleanupSettings, simplify_image, _merge_
 
 
 class CleanupTests(unittest.TestCase):
+    def test_edge_smoothing_softens_curve_without_halos_or_flat_interiors(self):
+        from dataclasses import replace
+        from PIL import ImageDraw
+        image = Image.new("RGBA", (120, 100), (240, 240, 240, 255))
+        ImageDraw.Draw(image).ellipse((20, 10, 90, 80), fill=(180, 20, 20, 255))
+        image.putpixel((0, 0), (0, 0, 0, 0))
+        settings = CleanupSettings(colors=4, min_feature_mm=0, color_delta=0)
+        sharp = simplify_image(image, settings).image
+        smooth = simplify_image(image, replace(settings, smooth_edges=True)).image
+        self.assertEqual(sharp.getpixel((50, 40)), smooth.getpixel((50, 40)))
+        self.assertEqual(sharp.getpixel((110, 90)), smooth.getpixel((110, 90)))
+        self.assertEqual(smooth.getpixel((0, 0))[3], 0)
+        sharp_rgb = np.asarray(sharp)[:, :, :3]
+        smooth_rgb = np.asarray(smooth)[:, :, :3]
+        self.assertGreater(np.count_nonzero(np.any(sharp_rgb != smooth_rgb, axis=2)), 50)
+        self.assertEqual(smooth.getpixel((1, 1))[:3], (240, 240, 240))
+
     def test_real_photo_cleanup_produces_valid_limited_palette(self):
         for name in ("cat-photo.jpg", "flower-photo.jpg", "dog-photo.jpg", "processor-photo.jpg"):
             with self.subTest(photo=name):

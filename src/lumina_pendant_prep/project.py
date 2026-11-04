@@ -51,6 +51,10 @@ def save_project(path: str | Path, data: dict[str, Any]) -> None:
 
 def load_project(path: str | Path) -> dict[str, Any]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return validate_project_data(data)
+
+
+def validate_project_data(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("Project must contain an object")
     if data.get("format") != "lumina-pendant-prep":
@@ -95,7 +99,7 @@ def load_project(path: str | Path) -> dict[str, Any]:
             raise ValueError(f"Invalid {key}")
     if "max_dimension" in data and (type(data["max_dimension"]) is not int or data["max_dimension"] not in (0, 2400, 4096)):
         raise ValueError("Invalid output resolution")
-    for key in ("cleanup", "hole_enabled", "outer_border_enabled", "hole_border_enabled", "protect_distinct_colors", "preserve_flat_colors", "heightmap_enabled", "heightmap_dark_high", "heightmap_far_high", "heightmap_border_high"):
+    for key in ("cleanup", "smooth_edges", "hole_enabled", "outer_border_enabled", "hole_border_enabled", "protect_distinct_colors", "preserve_flat_colors", "heightmap_enabled", "heightmap_dark_high", "heightmap_far_high", "heightmap_border_high"):
         if key in data and type(data[key]) is not bool:
             raise ValueError(f"Invalid {key}")
     for key in ("outer_border_color", "hole_border_color"):

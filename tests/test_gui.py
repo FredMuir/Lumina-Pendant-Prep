@@ -8,7 +8,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtTest import QTest
 
@@ -22,6 +22,51 @@ class GuiSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_user_presets_survive_restart_and_require_manual_start(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("lumina_pendant_prep.presets.preset_path", return_value=Path(directory) / "presets.json"):
+            window = MainWindow()
+            window.width_mm.setValue(75)
+            window.smooth_edges.setChecked(False)
+            window.hole_x_percent.setValue(40)
+            with patch("lumina_pendant_prep.app.QInputDialog.getText", return_value=("我的预设", True)):
+                window.save_new_preset()
+            self.assertNotIn("source_path", window._presets["我的预设"])
+            window.width_mm.setValue(80)
+            window.update_preset()
+            with patch("lumina_pendant_prep.app.QInputDialog.getText", return_value=("已重命名", True)):
+                window.rename_preset()
+            window.close()
+            window = MainWindow()
+            window.preset_select.setCurrentIndex(window.preset_select.findText("已重命名"))
+            self.assertEqual(window.width_mm.value(), 80)
+            self.assertFalse(window.smooth_edges.isChecked())
+            self.assertAlmostEqual(window.hole[0], .4)
+            self.assertTrue(window.open_image(str(photo)))
+            self.assertAlmostEqual(window.hole[0], .4)
+            self.assertFalse(window.processing_toggle.isChecked())
+            self.assertFalse(window.timer.isActive())
+            self.assertIsNone(window.output)
+            with patch("lumina_pendant_prep.app.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes):
+                window.delete_preset()
+            self.assertEqual(window.preset_select.count(), 1)
+            window.close()
+            self.assertEqual(list(Path(directory).iterdir()), [Path(directory) / "presets.json"])
+
+    def test_corrupt_preset_file_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "presets.json"
+            target.write_text("bad json", encoding="utf-8")
+            with patch("lumina_pendant_prep.presets.preset_path", return_value=target), \
+                 patch("lumina_pendant_prep.app.QInputDialog.getText", return_value=("test", True)), \
+                 patch("lumina_pendant_prep.app.QMessageBox.critical") as error:
+                window = MainWindow()
+                window.save_new_preset()
+                self.assertTrue(error.called)
+                self.assertEqual(target.read_text(encoding="utf-8"), "bad json")
+                window.close()
 
     def test_window_and_windows_icon_assets_are_available(self):
         from lumina_pendant_prep import app as app_module

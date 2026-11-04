@@ -15,7 +15,7 @@ from PySide6.QtGui import QAction, QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox, QCheckBox,
-    QColorDialog, QDialog, QProgressBar, QScrollArea, QSplitter, QVBoxLayout, QWidget,
+    QColorDialog, QDialog, QInputDialog, QProgressBar, QScrollArea, QSplitter, QVBoxLayout, QWidget,
 )
 
 from .canvas import ImageCanvas
@@ -24,6 +24,7 @@ from .cleanup import CleanupSettings, ProcessingCancelled, simplify_image
 from .image_io import open_rgba, SRGB_PROFILE
 from .depth import estimate_relative_depth, align_depth, depth_heightmap
 from .project import load_project, save_project, source_path_for_project, resolve_project_source
+from .presets import load_presets, write_presets
 from .render import (PendantSettings, crop_pixel_box, hole_has_clearance, hole_has_opaque_surrounding,
                      make_pendant, pendant_pixel_width)
 
@@ -183,6 +184,9 @@ class MainWindow(QMainWindow):
         self.redo_stack: list[dict] = []
         self._history_current: dict | None = None
         self._loading_project = False
+        self._preset_pending_photo = False
+        self._presets = {}
+        self._preset_error = None
         self.pool = QThreadPool.globalInstance()
         self.pool.setMaxThreadCount(1)
         self.timer = QTimer(self)
@@ -228,6 +232,28 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(self.progress_bar)
         control_layout.addWidget(self.progress_label)
 
+        preset_group = QGroupBox("参数预设（处理前选择）")
+        preset_layout = QVBoxLayout(preset_group)
+        self.preset_select = QComboBox()
+        self.preset_select.currentIndexChanged.connect(self._preset_selected)
+        preset_layout.addWidget(self.preset_select)
+        preset_row1 = QHBoxLayout()
+        preset_row2 = QHBoxLayout()
+        for title, action, row in (("保存为新预设", self.save_new_preset, preset_row1),
+                                   ("更新所选预设", self.update_preset, preset_row1),
+                                   ("重命名", self.rename_preset, preset_row2),
+                                   ("删除", self.delete_preset, preset_row2)):
+            button = QPushButton(title)
+            button.clicked.connect(action)
+            row.addWidget(button)
+        preset_layout.addLayout(preset_row1)
+        preset_layout.addLayout(preset_row2)
+        preset_hint = QLabel("预设只保存参数；选择后请点击开始处理。")
+        preset_hint.setWordWrap(True)
+        preset_layout.addWidget(preset_hint)
+        control_layout.addWidget(preset_group)
+        self._refresh_presets()
+
         print_group = QGroupBox("打印与色块净化")
         form = QFormLayout(print_group)
         self.width_mm = self._double(60, 1, 300, 0.5)
@@ -250,6 +276,9 @@ class MainWindow(QMainWindow):
         self.protect_flat.setChecked(True)
         self.flat_min_area = QSpinBox(); self.flat_min_area.setRange(1, 1000000); self.flat_min_area.setValue(16)
         self.flat_min_area.setToolTip("纯色区域至少需要此像素面积，还需满足当前最小特征面积。")
+        self.smooth_edges = QCheckBox("平滑色块边缘（减少锯齿）")
+        self.smooth_edges.setChecked(True)
+        self.smooth_edges.setToolTip("仅平滑相邻色块交界处约一像素；会增加少量过渡颜色，细节仍需检查切片。")
         self.protect_colors = QCheckBox("保留明显不同的小色块")
         self.protect_colors.setChecked(True)
         self.protect_colors.setToolTip("避免小色块被强行替换成色差过大的邻色；保留的细节仍可能无法打印。")
@@ -270,6 +299,7 @@ class MainWindow(QMainWindow):
         form.addRow("相近色阈值", self.color_delta)
         form.addRow(self.protect_flat)
         form.addRow("纯色最小面积 (像素)", self.flat_min_area)
+        form.addRow(self.smooth_edges)
         form.addRow(self.protect_colors)
         form.addRow("小色块最大合并色差", self.distinct_delta)
         form.addRow("处理模式", self.cleanup_toggle)
@@ -440,6 +470,7 @@ class MainWindow(QMainWindow):
         self.hole_y_percent.valueChanged.connect(self._hole_parameters_changed)
         self.outer_border_toggle.toggled.connect(self._schedule_preview)
         self.hole_border_toggle.toggled.connect(self._schedule_preview)
+        self.smooth_edges.toggled.connect(self._schedule_preview)
         self.protect_colors.toggled.connect(self._schedule_preview)
         self.protect_flat.toggled.connect(self._schedule_preview)
         self.protect_colors.toggled.connect(self._update_cleanup_controls)
@@ -461,6 +492,7 @@ class MainWindow(QMainWindow):
         self.colors.setEnabled(enabled)
         self.quantization_level.setEnabled(enabled)
         self.color_delta.setEnabled(enabled)
+        self.smooth_edges.setEnabled(enabled)
         self.protect_colors.setEnabled(enabled)
         self.protect_flat.setEnabled(enabled)
         self.flat_min_area.setEnabled(enabled and self.protect_flat.isChecked())
@@ -566,6 +598,122 @@ class MainWindow(QMainWindow):
         with QSignalBlocker(target_bar):
             target_bar.setValue(round(target_start + target_fraction * target_length - target_viewport / 2))
 
+    def _refresh_presets(self, selected=None):
+        try:
+            self._presets = load_presets()
+            self._preset_error = None
+        except (OSError, ValueError) as exc:
+            self._presets = {}
+            self._preset_error = str(exc)
+        with QSignalBlocker(self.preset_select):
+            self.preset_select.clear()
+            self.preset_select.addItem("选择预设…", None)
+            for name in sorted(self._presets, key=str.casefold):
+                self.preset_select.addItem(name, name)
+            index = self.preset_select.findData(selected)
+            self.preset_select.setCurrentIndex(max(0, index))
+        self.preset_select.setToolTip("预设读取失败：" + self._preset_error if self._preset_error else "选择后应用参数，不会自动处理照片。")
+
+    def _preset_settings(self):
+        data = self._project_data()
+        data.pop("source_path", None)
+        return data
+
+    def _preset_selected(self, *_):
+        name = self.preset_select.currentData()
+        if name is None:
+            return
+        try:
+            presets = load_presets()
+            if name not in presets:
+                raise ValueError("该预设已不存在，请重新选择。")
+            previous = self._project_data()
+            self._apply_history({**previous, **presets[name]})
+            if self.source is not None and previous != self._project_data():
+                self.undo_stack.append(previous)
+                self.undo_stack = self.undo_stack[-50:]
+                self.redo_stack.clear()
+            self._preset_pending_photo = self.source is None
+            self.progress_label.setText("已应用预设，请点击开始处理")
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "无法应用预设", str(exc))
+            self._refresh_presets()
+
+    def _preset_name(self, title, current=""):
+        name, ok = QInputDialog.getText(self, title, "预设名称（最多 80 个字符）：", text=current)
+        name = name.strip()
+        if not ok:
+            return None
+        if not name or len(name) > 80:
+            QMessageBox.information(self, "预设名称无效", "请输入 1 到 80 个字符。")
+            return None
+        return name
+
+    def _store_preset_change(self, operation):
+        try:
+            presets = load_presets()
+            selected = operation(presets)
+            if selected is None:
+                return
+            write_presets(presets)
+            self._refresh_presets(selected)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "预设操作失败", str(exc))
+
+    def save_new_preset(self):
+        name = self._preset_name("保存新预设")
+        if name is None:
+            return
+        def create(presets):
+            if name in presets:
+                raise ValueError("已有同名预设，请使用其他名称或更新所选预设。")
+            presets[name] = self._preset_settings()
+            return name
+        self._store_preset_change(create)
+
+    def update_preset(self):
+        name = self.preset_select.currentData()
+        if name is None:
+            QMessageBox.information(self, "请选择预设", "请先选择需要更新的预设。")
+            return
+        def update(presets):
+            if name not in presets:
+                raise ValueError("该预设已不存在，请重新选择。")
+            presets[name] = self._preset_settings()
+            return name
+        self._store_preset_change(update)
+
+    def rename_preset(self):
+        old = self.preset_select.currentData()
+        if old is None:
+            QMessageBox.information(self, "请选择预设", "请先选择需要重命名的预设。")
+            return
+        name = self._preset_name("重命名预设", old)
+        if name is None or name == old:
+            return
+        def rename(presets):
+            if old not in presets:
+                raise ValueError("该预设已不存在，请重新选择。")
+            if name in presets:
+                raise ValueError("已有同名预设，请使用其他名称。")
+            presets[name] = presets.pop(old)
+            return name
+        self._store_preset_change(rename)
+
+    def delete_preset(self):
+        name = self.preset_select.currentData()
+        if name is None:
+            QMessageBox.information(self, "请选择预设", "请先选择需要删除的预设。")
+            return
+        if QMessageBox.question(self, "删除预设", f"确定删除预设“{name}”？") != QMessageBox.StandardButton.Yes:
+            return
+        def delete(presets):
+            if name not in presets:
+                raise ValueError("该预设已不存在，请重新选择。")
+            del presets[name]
+            return ""
+        self._store_preset_change(delete)
+
     def _apply_gentle_preset(self):
         widgets = (self.colors, self.color_delta, self.min_feature_mm, self.cleanup_toggle, self.protect_colors, self.protect_flat)
         blockers = [QSignalBlocker(widget) for widget in widgets]
@@ -640,9 +788,11 @@ class MainWindow(QMainWindow):
         self.output_canvas.set_image(None)
         self.source, self.source_path = image, Path(filename)
         self.last_color_export_path = None
-        self.crop, self.hole = (0.0, 0.0, 1.0, 1.0), (0.5, 0.12)
-        self.polygon = []
-        self.protected_regions = []
+        if not self._preset_pending_photo:
+            self.crop, self.hole = (0.0, 0.0, 1.0, 1.0), (0.5, 0.12)
+            self.polygon = []
+            self.protected_regions = []
+        self._preset_pending_photo = False
         self.undo_stack.clear()
         self.redo_stack.clear()
         self._history_current = self._project_data()
@@ -748,6 +898,9 @@ class MainWindow(QMainWindow):
         self._schedule_preview()
 
     def _sync_geometry(self):
+        with QSignalBlocker(self.hole_x_percent), QSignalBlocker(self.hole_y_percent):
+            self.hole_x_percent.setValue(self.hole[0] * 100)
+            self.hole_y_percent.setValue(self.hole[1] * 100)
         if self.source is None:
             return
         shape = "Circle" if self.shape.currentText() == "圆形" else "Rectangle"
@@ -771,7 +924,8 @@ class MainWindow(QMainWindow):
         cleanup = CleanupSettings(self.colors.value(), effective_width,
                                   max(self.min_feature_mm.value(), self.nozzle_mm.currentData()),
                                   self.color_delta.value(), self.protect_colors.isChecked(),
-                                  self.protect_flat.isChecked(), self.flat_min_area.value(), self.distinct_delta.value())
+                                  self.protect_flat.isChecked(), self.flat_min_area.value(), self.distinct_delta.value(),
+                                  self.smooth_edges.isChecked())
         requested_hole = self.hole_toggle.currentIndex() == 0
         pendant = PendantSettings(
             crop=self.crop, shape={"圆角矩形": "Rounded rectangle", "矩形": "Rectangle",
@@ -796,6 +950,8 @@ class MainWindow(QMainWindow):
         return self.hole_mm.value() + self.hole_compensation_mm.value()
 
     def _schedule_preview(self, *_):
+        if self._loading_project:
+            return
         if self.source is not None:
             self._record_history()
             self._sync_geometry()
@@ -1017,6 +1173,7 @@ class MainWindow(QMainWindow):
             self.min_feature_mm.setValue(data.get("min_feature_mm", 0.45))
             self.colors.setValue(data.get("colors", 32))
             self.color_delta.setValue(data.get("color_delta", 8))
+            self.smooth_edges.setChecked(data.get("smooth_edges", True))
             self.protect_colors.setChecked(data.get("protect_distinct_colors", True))
             self.protect_flat.setChecked(data.get("preserve_flat_colors", data.get("protect_distinct_colors", True)))
             self.flat_min_area.setValue(data.get("flat_min_area_px", 16))
@@ -1253,6 +1410,7 @@ class MainWindow(QMainWindow):
             "target_width_mm": self.width_mm.value(), "nozzle_mm": self.nozzle_mm.currentData(),
             "min_feature_mm": self.min_feature_mm.value(), "colors": self.colors.value(),
             "color_delta": self.color_delta.value(), "cleanup": self.cleanup_toggle.currentIndex() == 0,
+            "smooth_edges": self.smooth_edges.isChecked(),
             "protect_distinct_colors": self.protect_colors.isChecked(),
             "preserve_flat_colors": self.protect_flat.isChecked(),
             "flat_min_area_px": self.flat_min_area.value(),

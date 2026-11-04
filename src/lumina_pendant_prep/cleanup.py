@@ -28,6 +28,7 @@ class CleanupSettings:
     preserve_flat_colors: bool | None = None
     flat_min_area_px: int = 16
     distinct_color_delta: float = 12.0
+    smooth_edges: bool = False
 
 
 @dataclass(frozen=True)
@@ -279,6 +280,29 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
         color = int(color)
         output_rgb[(labels == color) & opaque] = palette[color * 3:color * 3 + 3]
     output_rgb[flat_mask] = rgb_pixels[flat_mask]
+    if settings.smooth_edges:
+        # Blend only the one-pixel boundary between different output colors.
+        # Normalize by visibility so transparent pixels cannot introduce dark halos.
+        edge = np.zeros((height, width), dtype=bool)
+        horizontal = opaque[:, 1:] & opaque[:, :-1] & np.any(output_rgb[:, 1:] != output_rgb[:, :-1], axis=2)
+        vertical = opaque[1:, :] & opaque[:-1, :] & np.any(output_rgb[1:, :] != output_rgb[:-1, :], axis=2)
+        edge[:, 1:] |= horizontal
+        edge[:, :-1] |= horizontal
+        edge[1:, :] |= vertical
+        edge[:-1, :] |= vertical
+        smoothed = output_rgb.copy()
+        # Process strips with a one-pixel halo to bound temporary memory.
+        for top in range(0, height, 256):
+            _check_cancel(cancelled)
+            bottom = min(height, top + 256)
+            start, end = max(0, top - 1), min(height, bottom + 1)
+            visibility = opaque[start:end].astype(np.float32)
+            weight = cv2.GaussianBlur(visibility, (3, 3), 0)
+            blurred = cv2.GaussianBlur(output_rgb[start:end].astype(np.float32) * visibility[..., None], (3, 3), 0)
+            smooth = np.rint(blurred / np.maximum(weight[..., None], 1e-6)).clip(0, 255).astype(np.uint8)
+            selected = edge[top:bottom]
+            smoothed[top:bottom][selected] = smooth[top - start:bottom - start][selected]
+        output_rgb = smoothed
     output = Image.fromarray(np.dstack((output_rgb, alpha)), "RGBA")
     palette_rgb = np.asarray(palette, dtype=np.uint8).reshape(-1, 3)
     resulting_colors = flat_colors | {tuple(int(c) for c in palette_rgb[int(label)])
