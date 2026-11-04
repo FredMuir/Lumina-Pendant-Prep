@@ -206,6 +206,34 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(window.output_generation, window.generation)
         window.close()
 
+    def test_preview_discloses_actual_shape_when_settings_change(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        window = MainWindow()
+        window.cleanup_toggle.setCurrentText("保留原色")
+        self.assertTrue(window.open_image(str(photo)))
+        window.shape.setCurrentText("圆形")
+        window.hole_toggle.setCurrentIndex(1)
+        window.outer_border_toggle.setChecked(True)
+        window.processing_toggle.click()
+        deadline = time.monotonic() + 20
+        while window.output_generation != window.generation and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.02)
+        self.assertEqual(window.output_generation, window.generation)
+        self.assertIn("当前结果：圆形", window.preview_shape_label.text())
+        window.shape.setCurrentText("圆角矩形")
+        self.assertIn("旧预览：圆形", window.preview_shape_label.text())
+        self.assertIn("当前设置：圆角矩形", window.preview_shape_label.text())
+        self.assertIn("点击开始处理", window.preview_shape_label.text())
+        self.assertFalse(window.timer.isActive())
+        window.processing_toggle.click()
+        deadline = time.monotonic() + 20
+        while window.output_generation != window.generation and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.02)
+        self.assertEqual(window.output_generation, window.generation)
+        self.assertIn("当前结果：圆角矩形，外边框开启", window.preview_shape_label.text())
+        self.assertNotEqual(window.output.width, window.output.height)
+        window.close()
+
     def test_real_photo_heightmap_export_and_project_settings(self):
         photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
         with tempfile.TemporaryDirectory() as directory:

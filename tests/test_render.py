@@ -9,6 +9,31 @@ from lumina_pendant_prep.render import PendantSettings, hole_has_clearance, hole
 
 
 class PendantRenderTests(unittest.TestCase):
+    def test_rounded_rectangle_border_keeps_rectangle_shape_and_photo(self):
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with Image.open(photo) as image:
+            photo_rgb = image.convert("RGBA")
+        for size in ((320, 180), (200, 200), (180, 320)):
+            with self.subTest(size=size):
+                source = photo_rgb.resize(size, Image.Resampling.LANCZOS)
+                settings = PendantSettings(crop=(0, 0, 1, 1), shape="Rounded rectangle",
+                                           target_width_mm=60, corner_radius_mm=3,
+                                           hole_enabled=False, outer_border_enabled=True,
+                                           outer_border_mm=2, outer_border_color="#ff0000")
+                out = make_pendant(source, settings)
+                pad = max(1, round(2 * size[0] / 60))
+                self.assertEqual(out.size, (size[0] + 2 * pad, size[1] + 2 * pad))
+                # A rounded rectangle has long straight sides and retains
+                # opaque image pixels near all four corners; a circle does not.
+                for x, y in ((.10, .10), (.90, .10), (.10, .90), (.90, .90)):
+                    self.assertEqual(out.getpixel((pad + round((size[0] - 1) * x),
+                                                   pad + round((size[1] - 1) * y)))[3], 255)
+                plain = make_pendant(source, replace(settings, outer_border_enabled=False))
+                interior = np.asarray(out.crop((pad, pad, pad + size[0], pad + size[1])))
+                before = np.asarray(plain)
+                np.testing.assert_array_equal(interior[before[:, :, 3] > 0], before[before[:, :, 3] > 0])
+                self.assertEqual(out.getpixel((out.width // 2, 0))[:3], (255, 0, 0))
+
     def test_borders_do_not_cover_real_photo_and_hole_remains_clear(self):
         photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
         with Image.open(photo) as image:

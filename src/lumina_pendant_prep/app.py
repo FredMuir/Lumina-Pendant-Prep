@@ -347,6 +347,9 @@ class MainWindow(QMainWindow):
         zoom_row.addWidget(self.output_zoom)
         zoom_row.addWidget(QLabel("放大后用滚动条查看"))
         preview_layout.addLayout(zoom_row)
+        self.preview_shape_label = QLabel("尚无处理结果")
+        self.preview_shape_label.setWordWrap(True)
+        preview_layout.addWidget(self.preview_shape_label)
         panes = QSplitter(Qt.Orientation.Horizontal)
         self.input_canvas = ImageCanvas(interactive=True)
         self.output_canvas = ImageCanvas(interactive=False)
@@ -567,6 +570,7 @@ class MainWindow(QMainWindow):
         self.prepared = self.output = self.preview_changed = None
         self.preview_quantized = self.preview_merged = None
         self.preview_pendant = None
+        self.preview_shape_label.setText("尚无处理结果；设置外形和边框后点击开始处理。")
         self.output_canvas.set_image(None)
         self.source, self.source_path = image, Path(filename)
         self.last_color_export_path = None
@@ -740,6 +744,19 @@ class MainWindow(QMainWindow):
             self.processing_toggle.setText("开始处理")
             self._finish_progress("参数已更改，请点击开始处理")
             self.status.setText("参数已更改；当前预览是旧结果，请点击开始处理更新后再导出。")
+            self._update_preview_shape_label()
+
+    def _update_preview_shape_label(self):
+        if self.preview_pendant is None or self.output is None:
+            self.preview_shape_label.setText("尚无处理结果；设置外形和边框后点击开始处理。")
+            return
+        names = {"Rounded rectangle": "圆角矩形", "Rectangle": "矩形", "Circle": "圆形", "Polygon": "自定义多边形"}
+        shape = names.get(self.preview_pendant.shape, self.preview_pendant.shape)
+        border = "开启" if self.preview_pendant.outer_border_enabled else "关闭"
+        if self.output_generation != self.generation:
+            self.preview_shape_label.setText(f"旧预览：{shape}，外边框{border}；当前设置：{self.shape.currentText()}。请点击开始处理更新。")
+        else:
+            self.preview_shape_label.setText(f"当前结果：{shape}，外边框{border}。")
 
     def _start_preview(self):
         if self.source is None or not self.processing_toggle.isChecked():
@@ -791,6 +808,7 @@ class MainWindow(QMainWindow):
         self._finish_progress("处理完成", completed=True)
         self.prepared, self.output = prepared, output
         self.output_generation = generation
+        self._update_preview_shape_label()
         self.preview_changed = result.changed_mask if result else None
         self.preview_quantized = result.quantized_mask if result else None
         self.preview_merged = result.merged_mask if result else None

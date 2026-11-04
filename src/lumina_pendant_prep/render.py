@@ -190,8 +190,24 @@ def make_pendant(image: Image.Image, settings: PendantSettings) -> Image.Image:
             raise ValueError("外边框和输出尺寸过大，请减小边框宽度或输出分辨率")
         original = np.asarray(outline_mask, dtype=np.uint8)
         expanded = cv2.copyMakeBorder(original, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
-        distance = cv2.distanceTransform((expanded == 0).astype(np.uint8), cv2.DIST_L2, 5)
-        outside = ((expanded == 0) & (distance <= pad)).astype(np.uint8) * 255
+        if settings.shape == "Rounded rectangle":
+            # Construct the outer contour from the selected rectangle's own
+            # width, height and corner radius. Increasing the border width
+            # expands the corner radius, without turning the outline into a
+            # circle or changing the photo's aspect ratio.
+            outer_size = ((w + 2 * pad) * supersample, (h + 2 * pad) * supersample)
+            outer_mask = Image.new("L", outer_size, 0)
+            inner_radius = max(0, min(min(w, h) // 2, round(settings.corner_radius_mm * scale)))
+            ImageDraw.Draw(outer_mask).rounded_rectangle(
+                (0, 0, outer_size[0] - 1, outer_size[1] - 1),
+                radius=(inner_radius + pad) * supersample, fill=255,
+            )
+            if supersample != 1:
+                outer_mask = outer_mask.resize((w + 2 * pad, h + 2 * pad), Image.Resampling.BOX)
+            outside = np.where(expanded == 0, np.asarray(outer_mask, dtype=np.uint8), 0).astype(np.uint8)
+        else:
+            distance = cv2.distanceTransform((expanded == 0).astype(np.uint8), cv2.DIST_L2, 5)
+            outside = ((expanded == 0) & (distance <= pad)).astype(np.uint8) * 255
         background = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), ImageColor.getrgb(settings.outer_border_color) + (0,))
         background.putalpha(Image.fromarray(outside, "L"))
         background.alpha_composite(cropped, (pad, pad))
