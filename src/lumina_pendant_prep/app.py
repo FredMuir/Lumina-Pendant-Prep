@@ -166,8 +166,11 @@ class MainWindow(QMainWindow):
             self.nozzle_mm.addItem(f"{diameter:.1f}", diameter)
         self.nozzle_mm.setCurrentIndex(1)
         self.min_feature_mm = self._double(0.45, 0, 5, 0.05)
-        self.colors = QSpinBox(); self.colors.setRange(2, 128); self.colors.setValue(32)
-        self.color_delta = self._double(8, 0, 40, 1)
+        self.colors = QSpinBox(); self.colors.setRange(2, 128); self.colors.setValue(96)
+        self.color_delta = self._double(2, 0, 40, 1)
+        self.protect_colors = QCheckBox("保留颜色差异明显的小色块")
+        self.protect_colors.setChecked(True)
+        self.protect_colors.setToolTip("避免小色块被强行替换成差异明显的邻色；保留的细节仍可能过小而无法打印。")
         self.resolution = QComboBox()
         self.resolution.addItem("长边 2400 px（推荐）", 2400)
         self.resolution.addItem("长边 4096 px", 4096)
@@ -180,10 +183,11 @@ class MainWindow(QMainWindow):
         form.addRow("最小特征宽度 (mm)", self.min_feature_mm)
         form.addRow("颜色上限", self.colors)
         form.addRow("相近色阈值", self.color_delta)
+        form.addRow(self.protect_colors)
         form.addRow("处理模式", self.cleanup_toggle)
         form.addRow("输出分辨率", self.resolution)
         gentle_preset = QPushButton("温和预设（试用）")
-        gentle_preset.setToolTip("启用净化，颜色上限 96，相近色阈值 2，最小特征宽度设为当前喷嘴直径；效果需通过预览和打印确认。")
+        gentle_preset.setToolTip("启用净化和色彩保护，颜色上限 128，相近色阈值 1，最小特征宽度设为当前喷嘴直径；效果需通过预览和打印确认。")
         gentle_preset.clicked.connect(self._apply_gentle_preset)
         form.addRow(gentle_preset)
         control_layout.addWidget(print_group)
@@ -304,6 +308,7 @@ class MainWindow(QMainWindow):
         self.hole_y_percent.valueChanged.connect(self._hole_parameters_changed)
         self.outer_border_toggle.toggled.connect(self._schedule_preview)
         self.hole_border_toggle.toggled.connect(self._schedule_preview)
+        self.protect_colors.toggled.connect(self._schedule_preview)
         self.crop_tool.currentIndexChanged.connect(
             lambda i: self.input_canvas.set_mode(["crop", "hole", "outline", "protect"][i])
         )
@@ -320,6 +325,7 @@ class MainWindow(QMainWindow):
         enabled = self.cleanup_toggle.currentIndex() == 0
         self.colors.setEnabled(enabled)
         self.color_delta.setEnabled(enabled)
+        self.protect_colors.setEnabled(enabled)
 
     def _set_output_zoom(self, *_):
         factor = self.output_zoom.currentData()
@@ -338,10 +344,11 @@ class MainWindow(QMainWindow):
             target.setValue(round(value / maximum * target.maximum()) if maximum else 0)
 
     def _apply_gentle_preset(self):
-        widgets = (self.colors, self.color_delta, self.min_feature_mm, self.cleanup_toggle)
+        widgets = (self.colors, self.color_delta, self.min_feature_mm, self.cleanup_toggle, self.protect_colors)
         blockers = [QSignalBlocker(widget) for widget in widgets]
-        self.colors.setValue(96)
-        self.color_delta.setValue(2)
+        self.colors.setValue(128)
+        self.color_delta.setValue(1)
+        self.protect_colors.setChecked(True)
         self.min_feature_mm.setValue(self.nozzle_mm.currentData())
         self.cleanup_toggle.setCurrentIndex(0)
         del blockers
@@ -507,7 +514,7 @@ class MainWindow(QMainWindow):
         effective_width = self.width_mm.value() * self.source.width / output_width
         cleanup = CleanupSettings(self.colors.value(), effective_width,
                                   max(self.min_feature_mm.value(), self.nozzle_mm.currentData()),
-                                  self.color_delta.value())
+                                  self.color_delta.value(), self.protect_colors.isChecked())
         requested_hole = self.hole_toggle.currentIndex() == 0
         pendant = PendantSettings(
             crop=self.crop, shape={"圆角矩形": "Rounded rectangle", "矩形": "Rectangle",
@@ -583,6 +590,7 @@ class MainWindow(QMainWindow):
             self.status.setText(
                 f"预览就绪 · 调色 {result.original_colors} → {result.resulting_colors} 色 · "
                 f"合并 {result.merged_islands} 个小色岛 · 最小特征约 {result.minimum_feature_px}px "
+                f"· 色差保护保留 {result.protected_islands} 个小色岛（可能过小无法打印） "
                 f"(阈值不低于喷嘴 {self.nozzle_mm.currentData():.2f}mm) · 狭窄区域提示 {result.narrow_features} 个\n"
                 f"量化改变 {result.quantized_pixels / total:.1%} · 区域合并改变 {result.merged_pixels / total:.1%} 的待处理像素（孔切除前、不含保护区域，可重叠）。\n"
                 f"孔和背景均导出为透明像素。{hole_note}"
@@ -696,6 +704,7 @@ class MainWindow(QMainWindow):
             self.min_feature_mm.setValue(data.get("min_feature_mm", 0.45))
             self.colors.setValue(data.get("colors", 32))
             self.color_delta.setValue(data.get("color_delta", 8))
+            self.protect_colors.setChecked(data.get("protect_distinct_colors", True))
             self.resolution.setCurrentIndex(max(0, self.resolution.findData(data.get("max_dimension", 2400))))
             self.cleanup_toggle.setCurrentIndex(0 if data.get("cleanup", True) else 1)
             self.shape.setCurrentText(data.get("shape", "圆角矩形"))
@@ -803,6 +812,7 @@ class MainWindow(QMainWindow):
             "target_width_mm": self.width_mm.value(), "nozzle_mm": self.nozzle_mm.currentData(),
             "min_feature_mm": self.min_feature_mm.value(), "colors": self.colors.value(),
             "color_delta": self.color_delta.value(), "cleanup": self.cleanup_toggle.currentIndex() == 0,
+            "protect_distinct_colors": self.protect_colors.isChecked(),
             "max_dimension": self.resolution.currentData(),
             "shape": self.shape.currentText(), "corner_radius_mm": self.corner_mm.value(),
             "polygon": self.polygon,

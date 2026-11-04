@@ -307,14 +307,14 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(window.open_image(str(photo)))
         window.processing_toggle.setChecked(True)
         window._apply_gentle_preset()
-        self.assertEqual(window.colors.value(), 96)
-        self.assertEqual(window.color_delta.value(), 2)
+        self.assertEqual(window.colors.value(), 128)
+        self.assertEqual(window.color_delta.value(), 1)
         self.assertAlmostEqual(window.min_feature_mm.value(), 0.6)
         self.assertEqual(window.cleanup_toggle.currentText(), "净化色块")
         self.assertTrue(window.colors.isEnabled())
         window.undo()
-        self.assertEqual(window.colors.value(), 32)
-        self.assertEqual(window.color_delta.value(), 8)
+        self.assertEqual(window.colors.value(), 96)
+        self.assertEqual(window.color_delta.value(), 2)
         self.assertAlmostEqual(window.min_feature_mm.value(), 0.45)
         self.assertEqual(window.cleanup_toggle.currentText(), "保留原色")
         window.close()
@@ -515,6 +515,7 @@ class GuiSmokeTests(unittest.TestCase):
             window.hole_border_toggle.setChecked(True)
             window.hole_border_mm.setValue(.5)
             window.hole_border_color = "#0000ff"
+            window.protect_colors.setChecked(False)
             window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 30
             while window.output_generation != window.generation and time.monotonic() < deadline:
@@ -525,6 +526,7 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertGreater(window.output.width, window.source.width)
             project = Path(directory) / "border.lpproj"
             save_project(project, window._project_data())
+            window.protect_colors.setChecked(True)
             with patch("lumina_pendant_prep.app.QFileDialog.getOpenFileName", return_value=(str(project), "")):
                 window.load_project_dialog()
             self.assertFalse(window.processing_toggle.isChecked())
@@ -533,6 +535,7 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertTrue(window.hole_border_toggle.isChecked())
             self.assertEqual(window.outer_border_color, "#ff0000")
             self.assertEqual(window.hole_border_color, "#0000ff")
+            self.assertFalse(window.protect_colors.isChecked())
             window.close()
 
     def test_drag_hole_updates_numeric_position(self):

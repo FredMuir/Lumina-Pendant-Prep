@@ -17,7 +17,7 @@ class CleanupTests(unittest.TestCase):
                 result = simplify_image(source, CleanupSettings())
                 self.assertEqual(result.image.size, source.size)
                 self.assertEqual(result.image.getchannel("A").tobytes(), source.getchannel("A").tobytes())
-                self.assertLessEqual(result.resulting_colors, 32)
+                self.assertLessEqual(result.resulting_colors, 96)
                 self.assertGreater(result.original_colors, 1)
                 self.assertGreater(result.quantized_pixels, 0)
                 self.assertEqual(result.quantized_pixels, np.count_nonzero(np.asarray(result.quantized_mask)))
@@ -27,7 +27,7 @@ class CleanupTests(unittest.TestCase):
         source = Image.new("RGBA", (10, 10), (220, 25, 30, 255))
         source.putpixel((5, 5), (20, 40, 220, 255))
         source.putpixel((0, 0), (20, 40, 220, 0))
-        result = simplify_image(source, CleanupSettings(2, 10, 2, 0))
+        result = simplify_image(source, CleanupSettings(2, 10, 2, 0, False))
         self.assertEqual(result.quantized_pixels, 0)
         self.assertEqual(result.merged_pixels, 1)
         self.assertEqual(result.merged_mask.getpixel((5, 5)), 255)
@@ -57,7 +57,7 @@ class CleanupTests(unittest.TestCase):
         source = Image.new("RGB", (2, 1))
         source.putdata([(230, 20, 30), (20, 40, 230)])
         result = simplify_image(source, CleanupSettings(
-            colors=2, target_width_mm=2, min_feature_mm=2, color_delta=0,
+            colors=2, target_width_mm=2, min_feature_mm=2, color_delta=0, protect_distinct_colors=False,
         ))
         self.assertEqual(result.resulting_colors, 1)
         self.assertEqual(result.image.getpixel((0, 0)), result.image.getpixel((1, 0)))
@@ -71,7 +71,7 @@ class CleanupTests(unittest.TestCase):
         source = Image.fromarray(pixels, "RGBA")
 
         result = simplify_image(source, CleanupSettings(
-            colors=4, target_width_mm=100, min_feature_mm=4, color_delta=0,
+            colors=4, target_width_mm=100, min_feature_mm=4, color_delta=0, protect_distinct_colors=False,
         ))
 
         output = np.asarray(result.image)
@@ -110,6 +110,30 @@ class CleanupTests(unittest.TestCase):
             colors=4, target_width_mm=20, min_feature_mm=0, color_delta=0,
         ))
         self.assertEqual(result.merged_islands, 0)
+
+    def test_distinct_orange_and_green_islands_are_not_recolored_by_default(self):
+        pixels = np.full((40, 60, 4), (176, 150, 60, 255), dtype=np.uint8)
+        pixels[5:7, 5:7] = (255, 155, 0, 255)
+        pixels[15:17, 15:17] = (0, 175, 60, 255)
+        source = Image.fromarray(pixels, "RGBA")
+        protected = simplify_image(source, CleanupSettings(8, 60, 4, 0))
+        self.assertEqual(protected.image.getpixel((5, 5))[:3], (255, 155, 0))
+        self.assertEqual(protected.image.getpixel((15, 15))[:3], (0, 175, 60))
+        self.assertEqual(protected.protected_islands, 2)
+        force = simplify_image(source, CleanupSettings(8, 60, 4, 0, False))
+        self.assertEqual(force.protected_islands, 0)
+        self.assertGreaterEqual(force.merged_islands, 2)
+
+    def test_real_photo_default_quantization_reduces_average_color_error(self):
+        with Image.open(Path(__file__).parent / "fixtures" / "flower-photo.jpg") as photo:
+            source = photo.convert("RGBA")
+            source.thumbnail((320, 320), Image.Resampling.LANCZOS)
+        old = simplify_image(source, CleanupSettings(32, 60, 0, 0, False))
+        new = simplify_image(source, CleanupSettings(96, 60, 0, 0))
+        reference = np.asarray(source.convert("RGB"), dtype=np.float32)
+        old_error = np.abs(np.asarray(old.image.convert("RGB"), dtype=np.float32) - reference).mean()
+        new_error = np.abs(np.asarray(new.image.convert("RGB"), dtype=np.float32) - reference).mean()
+        self.assertLess(new_error, old_error)
 
 
 if __name__ == "__main__":

@@ -20,10 +20,11 @@ def _check_cancel(cancelled: Callable[[], bool] | None) -> None:
 
 @dataclass(frozen=True)
 class CleanupSettings:
-    colors: int = 32
+    colors: int = 96
     target_width_mm: float = 60.0
     min_feature_mm: float = 0.45
-    color_delta: float = 8.0
+    color_delta: float = 2.0
+    protect_distinct_colors: bool = True
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class CleanupResult:
     original_colors: int
     resulting_colors: int
     merged_islands: int
+    protected_islands: int
     minimum_feature_px: int
     narrow_features: int
 
@@ -161,6 +163,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
     minimum_feature_px = max(1, math.ceil(width / settings.target_width_mm * settings.min_feature_mm))
     minimum_area = minimum_feature_px * minimum_feature_px
     merged_islands = 0
+    protected_islands = 0
     narrow_features = 0
     if minimum_area > 1:
         # Update labels after each merge so adjacent tiny components cannot
@@ -201,6 +204,13 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
                 candidates = [(int(n), int(contact[n])) for n in np.flatnonzero(contact)]
                 if not candidates:
                     continue
+                # A small but distinctly colored detail is often an eye, a
+                # flower, or a printed feature; do not silently recolor it.
+                if settings.protect_distinct_colors:
+                    candidates = [pair for pair in candidates if distances[color, pair[0]] <= 12.0]
+                    if not candidates:
+                        protected_islands += 1
+                        continue
                 chosen = min(
                     candidates,
                     key=lambda pair: (
@@ -236,6 +246,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
         original_colors=original_colors,
         resulting_colors=len(np.unique(labels[opaque])) if np.any(opaque) else 0,
         merged_islands=merged_islands,
+        protected_islands=protected_islands,
         minimum_feature_px=minimum_feature_px,
         narrow_features=narrow_features,
     )

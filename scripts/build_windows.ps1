@@ -46,7 +46,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Candidate PNG validation failed.' }
 } finally { $env:QT_QPA_PLATFORM = $oldQtPlatform }
 
-$previous = if (Test-Path -LiteralPath $currentFile) { (Get-Content -LiteralPath $currentFile -Raw).Trim() } else { '' }
 Move-Item -LiteralPath $candidate -Destination $destination
 @{version=$version; revision=$revision; installed_at=(Get-Date).ToString('s'); managed_by='LuminaPendantPrep'} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination 'BUILD_INFO.json') -Encoding utf8
@@ -54,11 +53,14 @@ $temporaryPointer = Join-Path $installRoot ('current-' + [guid]::NewGuid().ToStr
 [IO.File]::WriteAllText($temporaryPointer, $versionName, [Text.Encoding]::ASCII)
 Move-Item -LiteralPath $temporaryPointer -Destination $currentFile -Force
 Remove-ManagedPath $buildRoot
-if ($previous -match '^\d+\.\d+\.\d+-[0-9a-f]+$' -and $previous -ne $versionName) {
-    $old = Join-Path $versionsRoot $previous
-    $marker = Join-Path $old 'BUILD_INFO.json'
+foreach ($old in Get-ChildItem -LiteralPath $versionsRoot -Directory) {
+    if ($old.Name -eq $versionName -or $old.Name -notmatch '^\d+\.\d+\.\d+-[0-9a-f]+$') { continue }
+    $marker = Join-Path $old.FullName 'BUILD_INFO.json'
     if ((Test-Path -LiteralPath $marker) -and ((Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json).managed_by -eq 'LuminaPendantPrep')) {
-        Remove-ManagedPath $old
+        $oldExe = Join-Path $old.FullName 'LuminaPendantPrep.exe'
+        $running = @(Get-Process LuminaPendantPrep -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $oldExe })
+        if ($running.Count) { Write-Warning "Previous version is running; retained at $($old.FullName)"; continue }
+        try { Remove-ManagedPath $old.FullName } catch { Write-Warning "Could not remove previous version: $($old.FullName)" }
     }
 }
 Write-Host "Installed Lumina Pendant Prep $version ($revision) at $destination"
