@@ -77,6 +77,8 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(window.output_generation, window.generation)
         self.assertIn("处理完成", window.progress_label.text())
         self.assertEqual(window.progress_bar.value(), 1)
+        self.assertEqual(window.processing_toggle.text(), "开始处理")
+        window.processing_toggle.click()
         window.processing_toggle.click()
         self.assertEqual(window.processing_toggle.text(), "开始处理")
         self.assertEqual(window.progress_label.text(), "处理已停止")
@@ -96,6 +98,64 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual([generation for generation, _ in stages], [7] * 7)
         self.assertEqual([stage.split("：")[0] for _, stage in stages],
                          [f"步骤 {i}/7" for i in range(1, 8)])
+
+    def test_changes_require_explicit_reprocessing_and_block_stale_exports(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        window = MainWindow()
+        self.assertTrue(window.open_image(str(photo)))
+        window.cleanup_toggle.setCurrentText("保留原色")
+        window.processing_toggle.click()
+        deadline = time.monotonic() + 20
+        while window.output_generation != window.generation and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.02)
+        self.assertEqual(window.output_generation, window.generation)
+        previous = window.output.tobytes()
+        window.colors.setValue(64)
+        self.assertFalse(window.timer.isActive())
+        self.assertFalse(window.processing_toggle.isChecked())
+        self.assertEqual(window.output.tobytes(), previous)
+        self.assertNotEqual(window.output_generation, window.generation)
+        self.assertIn("点击开始处理", window.progress_label.text())
+        window.heightmap_enabled.setChecked(True)
+        with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName") as dialog, \
+             patch("lumina_pendant_prep.app.QMessageBox.information"):
+            window.export_png(); window.export_heightmap()
+            dialog.assert_not_called()
+        window.processing_toggle.click()
+        deadline = time.monotonic() + 20
+        while window.output_generation != window.generation and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.02)
+        self.assertEqual(window.output_generation, window.generation)
+        window.close()
+
+    def test_real_photo_heightmap_export_and_project_settings(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            window = MainWindow()
+            window.cleanup_toggle.setCurrentText("保留原色")
+            self.assertTrue(window.open_image(str(photo)))
+            window.processing_toggle.click()
+            deadline = time.monotonic() + 20
+            while window.output_generation != window.generation and time.monotonic() < deadline:
+                self.app.processEvents(); time.sleep(.02)
+            self.assertEqual(window.output_generation, window.generation)
+            self.assertFalse(window.heightmap_export_button.isEnabled())
+            window.heightmap_enabled.setChecked(True)
+            window.heightmap_direction.setCurrentIndex(1)
+            self.assertEqual(window.output_generation, window.generation)
+            target = root / "height.png"
+            with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName", return_value=(str(target), "")), \
+                 patch("lumina_pendant_prep.app.QMessageBox.information"):
+                window.export_heightmap()
+            with Image.open(target) as result:
+                self.assertEqual(result.mode, "L")
+                self.assertEqual(result.size, window.output.size)
+                self.assertEqual(result.getpixel((0, 0)), 0)
+                self.assertNotIn("icc_profile", result.info)
+            self.assertTrue(window._project_data()["heightmap_enabled"])
+            self.assertTrue(window._project_data()["heightmap_dark_high"])
+            window.close()
 
     def test_multiframe_photo_discloses_selected_primary_or_first_page(self):
         fixtures = Path(__file__).parent / "fixtures"
@@ -225,6 +285,10 @@ class GuiSmokeTests(unittest.TestCase):
         old_job.signals.cancelled.connect(cancelled.append)
         window.cleanup_toggle.setCurrentText("保留原色")
         self.assertTrue(old_job.cancel_requested.is_set())
+        self.assertFalse(window.processing_toggle.isChecked())
+        self.assertFalse(window.timer.isActive())
+        self.assertIn("点击开始处理", window.progress_label.text())
+        window.processing_toggle.click()
         deadline = time.monotonic() + 30
         while window.output_generation != window.generation and time.monotonic() < deadline:
             self.app.processEvents()
@@ -279,6 +343,7 @@ class GuiSmokeTests(unittest.TestCase):
             QTest.mouseRelease(window.input_canvas, Qt.MouseButton.LeftButton, pos=end)
             self.assertEqual(len(window.protected_regions), 1)
             region = window.protected_regions[0]
+            window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 20
             while window.output_generation != window.generation and time.monotonic() < deadline:
                 self.app.processEvents()
@@ -382,8 +447,8 @@ class GuiSmokeTests(unittest.TestCase):
             Image.new("RGB", (40, 40), "red").save(path)
             window = MainWindow()
             window.open_image(str(path))
-            window.processing_toggle.setChecked(True)
             window.shape.setCurrentText("自定义多边形")
+            window.processing_toggle.setChecked(True)
             window.timer.stop()
             window._start_preview()
             self.assertIsNone(window.output)
@@ -461,8 +526,8 @@ class GuiSmokeTests(unittest.TestCase):
             window = MainWindow()
             window.cleanup_toggle.setCurrentText("保留原色")
             self.assertTrue(window.open_image(str(photo)))
-            window.processing_toggle.setChecked(True)
             window._set_hole(0.01, 0.01)
+            window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 20
             while window.output_generation != window.generation and time.monotonic() < deadline:
                 self.app.processEvents()
@@ -475,6 +540,7 @@ class GuiSmokeTests(unittest.TestCase):
                 dialog.assert_not_called()
                 self.assertEqual(notice.call_args.args[1], "挂绳孔无法裁切")
             window.hole_toggle.setCurrentIndex(1)
+            window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 20
             while window.output_generation != window.generation and time.monotonic() < deadline:
                 self.app.processEvents()
@@ -538,6 +604,7 @@ class GuiSmokeTests(unittest.TestCase):
             wait_for_preview()
             base_width = transparent_width()
             window.hole_compensation_mm.setValue(.6)
+            window.processing_toggle.setChecked(True)
             wait_for_preview()
             self.assertGreaterEqual(transparent_width(), base_width + 6)
             self.assertAlmostEqual(window._settings()[1].hole_diameter_mm, 4.6)

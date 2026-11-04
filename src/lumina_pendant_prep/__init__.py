@@ -1,3 +1,3 @@
 """Image preparation for layered FDM pendants and photo prints."""
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"

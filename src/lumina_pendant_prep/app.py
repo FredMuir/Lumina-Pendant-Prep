@@ -21,6 +21,7 @@ from .canvas import ImageCanvas
 from . import __version__
 from .cleanup import CleanupSettings, ProcessingCancelled, simplify_image
 from .image_io import open_rgba, SRGB_PROFILE
+from .heightmap import make_heightmap
 from .project import load_project, save_project, source_path_for_project, resolve_project_source
 from .render import (PendantSettings, crop_pixel_box, hole_has_clearance, hole_has_opaque_surrounding,
                      make_pendant, pendant_pixel_width)
@@ -116,6 +117,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.source: Image.Image | None = None
         self.source_path: Path | None = None
+        self.last_color_export_path: Path | None = None
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.hole = (0.5, 0.12)
         self.polygon: list[tuple[float, float]] = []
@@ -130,6 +132,8 @@ class MainWindow(QMainWindow):
         self.output_generation = -1
         self.preview_running = False
         self.active_job: PreviewJob | None = None
+        self.pending_start = False
+        self.preview_pendant: PendantSettings | None = None
         self.undo_stack: list[dict] = []
         self.redo_stack: list[dict] = []
         self._history_current: dict | None = None
@@ -221,6 +225,24 @@ class MainWindow(QMainWindow):
         gentle_preset.clicked.connect(self._apply_gentle_preset)
         form.addRow(gentle_preset)
         control_layout.addWidget(print_group)
+
+        height_group = QGroupBox("Lumina 浮雕高度图")
+        height_form = QFormLayout(height_group)
+        self.heightmap_enabled = QCheckBox("启用高度图导出")
+        self.heightmap_direction = QComboBox()
+        self.heightmap_direction.addItems(["浅色凸起", "深色凸起"])
+        self.heightmap_export_button = QPushButton("导出浮雕高度图 PNG")
+        self.heightmap_export_button.clicked.connect(self.export_heightmap)
+        self.heightmap_enabled.toggled.connect(self._heightmap_options_changed)
+        self.heightmap_direction.currentIndexChanged.connect(self._heightmap_options_changed)
+        height_form.addRow(self.heightmap_enabled)
+        height_form.addRow("高度方向", self.heightmap_direction)
+        height_form.addRow(self.heightmap_export_button)
+        hint = QLabel("根据处理结果的亮度生成；黑色低、白色高，不代表真实景深。")
+        hint.setWordWrap(True)
+        height_form.addRow(hint)
+        control_layout.addWidget(height_group)
+        self._heightmap_options_changed()
 
         shape_group = QGroupBox("挂坠裁切")
         shape_form = QFormLayout(shape_group)
@@ -358,6 +380,13 @@ class MainWindow(QMainWindow):
         self.color_delta.setEnabled(enabled)
         self.protect_colors.setEnabled(enabled)
 
+    def _heightmap_options_changed(self, *_):
+        enabled = self.heightmap_enabled.isChecked()
+        self.heightmap_direction.setEnabled(enabled)
+        self.heightmap_export_button.setEnabled(enabled)
+        if hasattr(self, "_history_current") and self.source is not None:
+            self._record_history()
+
     def _quantization_level_changed(self, *_):
         amount = self.quantization_level.currentData()
         if amount is not None:
@@ -443,6 +472,7 @@ class MainWindow(QMainWindow):
             return False
         if self.active_job is not None:
             self.active_job.cancel()
+        self.pending_start = False
         self.timer.stop()
         with QSignalBlocker(self.processing_toggle):
             self.processing_toggle.setChecked(False)
@@ -452,8 +482,10 @@ class MainWindow(QMainWindow):
         self.output_generation = -1
         self.prepared = self.output = self.preview_changed = None
         self.preview_quantized = self.preview_merged = None
+        self.preview_pendant = None
         self.output_canvas.set_image(None)
         self.source, self.source_path = image, Path(filename)
+        self.last_color_export_path = None
         self.crop, self.hole = (0.0, 0.0, 1.0, 1.0), (0.5, 0.12)
         self.polygon = []
         self.protected_regions = []
@@ -475,10 +507,12 @@ class MainWindow(QMainWindow):
                     self.processing_toggle.setChecked(False)
                 return
             self.processing_toggle.setText("停止处理")
-            self._schedule_preview()
+            self.pending_start = True
+            self.timer.start(0)
         else:
             self.processing_toggle.setText("开始处理")
             self.timer.stop()
+            self.pending_start = False
             self.generation += 1
             if self.active_job is not None:
                 self.active_job.cancel()
@@ -612,15 +646,15 @@ class MainWindow(QMainWindow):
             self._sync_geometry()
             self._update_status()
             self.generation += 1
+            self.timer.stop()
+            self.pending_start = False
             if self.active_job is not None:
                 self.active_job.cancel()
-            if self.processing_toggle.isChecked():
-                if self.active_job is not None:
-                    self.progress_stage = "正在停止旧任务，准备重新处理"
-                    self._update_progress_label()
-                else:
-                    self.progress_label.setText("等待处理")
-                self.timer.start()
+            with QSignalBlocker(self.processing_toggle):
+                self.processing_toggle.setChecked(False)
+            self.processing_toggle.setText("开始处理")
+            self._finish_progress("参数已更改，请点击开始处理")
+            self.status.setText("参数已更改；当前预览是旧结果，请点击开始处理更新后再导出。")
 
     def _start_preview(self):
         if self.source is None or not self.processing_toggle.isChecked():
@@ -633,12 +667,17 @@ class MainWindow(QMainWindow):
             self.output_canvas.set_image(None)
             self.status.setText("请用多边形工具至少绘制三个节点，并右键完成轮廓。")
             self._finish_progress("等待完成多边形")
+            self.pending_start = False
+            with QSignalBlocker(self.processing_toggle):
+                self.processing_toggle.setChecked(False)
+            self.processing_toggle.setText("开始处理")
             return
         cleanup, pendant = self._settings()
         job = PreviewJob(self.generation, self.source, cleanup, pendant,
                          self.cleanup_toggle.currentIndex() == 0, self.protected_regions,
                          self.resolution.currentData())
         self.active_job = job
+        self.pending_start = False
         job.signals.finished.connect(self._preview_ready)
         job.signals.failed.connect(self._preview_failed)
         job.signals.cancelled.connect(self._preview_cancelled)
@@ -653,11 +692,17 @@ class MainWindow(QMainWindow):
         self.status.setText("正在生成预览…")
 
     def _preview_ready(self, generation, prepared, output, result):
+        job = self.active_job
         self.preview_running = False
         self.active_job = None
         if generation != self.generation:
-            self.timer.start(0)
+            if self.pending_start:
+                self.timer.start(0)
             return
+        self.preview_pendant = job.pendant if job else None
+        with QSignalBlocker(self.processing_toggle):
+            self.processing_toggle.setChecked(False)
+        self.processing_toggle.setText("开始处理")
         self._finish_progress("处理完成", completed=True)
         self.prepared, self.output = prepared, output
         self.output_generation = generation
@@ -686,20 +731,26 @@ class MainWindow(QMainWindow):
         self.preview_running = False
         self.active_job = None
         if generation != self.generation:
-            self.timer.start(0)
+            if self.pending_start:
+                self.timer.start(0)
         else:
+            with QSignalBlocker(self.processing_toggle):
+                self.processing_toggle.setChecked(False)
+            self.processing_toggle.setText("开始处理")
             self._finish_progress("处理失败")
             self.status.setText(f"预览失败：{message}")
 
     def _preview_cancelled(self, generation):
         self.preview_running = False
         self.active_job = None
-        if self.source is not None and self.processing_toggle.isChecked() and generation != self.generation:
+        if self.source is not None and self.processing_toggle.isChecked() and self.pending_start:
             self.timer.start(0)
 
     def closeEvent(self, event):
         self.timer.stop()
         self.progress_timer.stop()
+        self.pending_start = False
+        self.generation += 1
         if self.active_job is not None:
             self.active_job.cancel()
         super().closeEvent(event)
@@ -744,12 +795,12 @@ class MainWindow(QMainWindow):
             return
         preview = self.output
         mask = (self.preview_changed, self.preview_quantized, self.preview_merged)[self.highlight_mode.currentIndex()]
-        if self.highlight_toggle.isChecked() and mask is not None and self.prepared is not None:
+        if self.highlight_toggle.isChecked() and mask is not None and self.prepared is not None and self.preview_pendant is not None:
             tint = Image.new("RGBA", self.prepared.size, (255, 74, 65, 0))
             changed_alpha = mask.point(lambda value: value * 105 // 255)
             changed_alpha = ImageChops.multiply(changed_alpha, self.prepared.getchannel("A"))
             tint.putalpha(changed_alpha)
-            preview = make_pendant(Image.alpha_composite(self.prepared, tint), self._settings()[1])
+            preview = make_pendant(Image.alpha_composite(self.prepared, tint), self.preview_pendant)
         self.output_canvas.set_image(preview)
 
     def _record_history(self):
@@ -802,6 +853,9 @@ class MainWindow(QMainWindow):
             self.hole_border_toggle.setChecked(data.get("hole_border_enabled", False))
             self.hole_border_mm.setValue(data.get("hole_border_mm", .5))
             self.hole_border_color = data.get("hole_border_color", "#ffffff")
+            self.heightmap_enabled.setChecked(data.get("heightmap_enabled", False))
+            self.heightmap_direction.setCurrentIndex(1 if data.get("heightmap_dark_high", False) else 0)
+            self._heightmap_options_changed()
             self._update_border_buttons()
         finally:
             self._loading_project = previous_loading
@@ -817,7 +871,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "尚无图像", "请先打开一张照片并等待预览完成。")
             return
         if self.output_generation != self.generation:
-            QMessageBox.information(self, "预览尚未更新", "请等待当前设置的预览完成后再导出。")
+            QMessageBox.information(self, "预览尚未更新", "参数已更改，请点击开始处理，完成后再导出。")
             return
         if self.hole_toggle.currentIndex() == 0 and not self.hole_safe:
             QMessageBox.information(self, "挂绳孔无法裁切",
@@ -833,6 +887,7 @@ class MainWindow(QMainWindow):
             return
         try:
             filename = self.write_png(self.output, filename)
+            self.last_color_export_path = Path(filename)
             dpi = self.output.info.get("dpi", (300, 300))[0]
             width_mm = 25.4 * self.output.width / dpi
             height_mm = 25.4 * self.output.height / dpi
@@ -851,6 +906,40 @@ class MainWindow(QMainWindow):
                                     "否则孔和成品尺寸会按比例改变。\n"
                                     "孔径是图片中的设计值；建模和切片可能改变实际开口，请检查切片结果。")
         except OSError as exc:
+            QMessageBox.critical(self, "导出失败", str(exc))
+
+    def export_heightmap(self):
+        if not self.heightmap_enabled.isChecked():
+            return
+        if self.output is None or self.output_generation != self.generation:
+            QMessageBox.information(self, "预览尚未更新", "请先点击开始处理，完成后再导出高度图。")
+            return
+        if self.hole_toggle.currentIndex() == 0 and not self.hole_safe:
+            QMessageBox.information(self, "挂绳孔无法裁切", "请先调整孔位置或关闭挂绳孔，然后重新处理。")
+            return
+        default = (self.source_path.stem if self.source_path else "pendant") + "-heightmap.png"
+        filename, _ = QFileDialog.getSaveFileName(self, "导出浮雕高度图", default, "PNG 图像 (*.png)")
+        if not filename:
+            return
+        destination = self._png_path(filename)
+        same_color = False
+        if self.last_color_export_path is not None:
+            try:
+                same_color = (destination.resolve() == self.last_color_export_path.resolve() or
+                              (destination.exists() and self.last_color_export_path.exists() and
+                               destination.samefile(self.last_color_export_path)))
+            except OSError:
+                same_color = True
+        if self._is_source_path(destination) or same_color:
+            QMessageBox.critical(self, "无法导出", "高度图不能覆盖原照片或刚导出的彩色图片，请选择其他文件名。")
+            return
+        try:
+            heightmap = make_heightmap(self.output, self.heightmap_direction.currentIndex() == 1)
+            filename = self.write_png(heightmap, filename)
+            QMessageBox.information(self, "高度图已导出", f"已保存：\n{filename}\n\n"
+                                    "在 Lumina 中先导入彩色 PNG 并完成普通预览，再启用浮雕、选择“根据高度图”并上传本文件。"
+                                    "黑色低、白色高；最大高度在 Lumina 中设置。透明背景和孔在高度图中为黑色，轮廓依赖彩色图。")
+        except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
 
     @staticmethod
@@ -879,8 +968,10 @@ class MainWindow(QMainWindow):
             with tempfile.NamedTemporaryFile(mode="w+b", dir=path.parent,
                                              prefix=f".{path.name}.", suffix=".tmp", delete=False) as file:
                 temporary = Path(file.name)
-                image.save(file, format="PNG", dpi=image.info.get("dpi", (300, 300)),
-                           icc_profile=SRGB_PROFILE)
+                options = {"dpi": image.info.get("dpi", (300, 300))}
+                if image.mode in ("RGB", "RGBA"):
+                    options["icc_profile"] = SRGB_PROFILE
+                image.save(file, format="PNG", **options)
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temporary, path)
@@ -908,6 +999,8 @@ class MainWindow(QMainWindow):
             "outer_border_mm": self.outer_border_mm.value(), "outer_border_color": self.outer_border_color,
             "hole_border_enabled": self.hole_border_toggle.isChecked(),
             "hole_border_mm": self.hole_border_mm.value(), "hole_border_color": self.hole_border_color,
+            "heightmap_enabled": self.heightmap_enabled.isChecked(),
+            "heightmap_dark_high": self.heightmap_direction.currentIndex() == 1,
         }
 
     def save_project_dialog(self):
