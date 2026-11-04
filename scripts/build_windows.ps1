@@ -57,8 +57,9 @@ foreach ($old in Get-ChildItem -LiteralPath $versionsRoot -Directory) {
     if ($old.Name -eq $versionName -or $old.Name -notmatch '^\d+\.\d+\.\d+-[0-9a-f]+$') { continue }
     $marker = Join-Path $old.FullName 'BUILD_INFO.json'
     if ((Test-Path -LiteralPath $marker) -and ((Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json).managed_by -eq 'LuminaPendantPrep')) {
-        $oldExe = Join-Path $old.FullName 'LuminaPendantPrep.exe'
-        $running = @(Get-Process LuminaPendantPrep -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $oldExe })
+        # Windows app-container redirection can report different paths for the
+        # same executable. Retain all old builds while any app instance runs.
+        $running = @(Get-Process LuminaPendantPrep -ErrorAction SilentlyContinue)
         if ($running.Count) { Write-Warning "Previous version is running; retained at $($old.FullName)"; continue }
         try { Remove-ManagedPath $old.FullName } catch { Write-Warning "Could not remove previous version: $($old.FullName)" }
     }
