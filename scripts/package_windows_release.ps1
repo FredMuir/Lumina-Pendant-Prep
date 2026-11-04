@@ -24,7 +24,7 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $pythonLicense)) { throw 'Python license not found.' }
     Copy-Item -LiteralPath $pythonLicense -Destination (Join-Path $notices 'Python-LICENSE.txt')
     $site = Join-Path $root '.venv\Lib\site-packages'
-    $names = @('numpy-*dist-info','opencv_python_headless-*dist-info','pillow-*dist-info','pillow_heif-*dist-info','pyside6-*dist-info','pyside6_essentials-*dist-info','shiboken6-*dist-info')
+    $names = @('numpy-*dist-info','opencv_python_headless-*dist-info','pillow-*dist-info','pillow_heif-*dist-info','pyside6-*dist-info','pyside6_essentials-*dist-info','shiboken6-*dist-info','onnxruntime-*dist-info','flatbuffers-*dist-info','protobuf-*dist-info')
     foreach ($name in $names) {
         foreach ($info in Get-ChildItem -Path (Join-Path $site $name) -Directory) {
             $target = Join-Path $notices $info.Name
@@ -37,6 +37,7 @@ try {
     }
     Invoke-WebRequest 'https://www.gnu.org/licenses/lgpl-3.0.txt' -OutFile (Join-Path $notices 'LGPL-3.0.txt')
     Invoke-WebRequest 'https://www.gnu.org/licenses/gpl-3.0.txt' -OutFile (Join-Path $notices 'GPL-3.0.txt')
+    Invoke-WebRequest 'https://www.apache.org/licenses/LICENSE-2.0.txt' -OutFile (Join-Path $notices 'Apache-2.0.txt')
     Copy-Item -LiteralPath (Join-Path $root 'docs\THIRD_PARTY.md') -Destination $notices
     Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $staging
     & $compiler "/DAppVersion=$version" "/DBundleDir=$staging" "/DOutputDir=$output" (Join-Path $PSScriptRoot 'windows_installer.iss')

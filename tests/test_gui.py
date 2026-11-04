@@ -248,10 +248,18 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertEqual(window.output_generation, window.generation)
             self.assertFalse(window.heightmap_export_button.isEnabled())
             window.heightmap_enabled.setChecked(True)
+            window.generate_depth()
+            deadline = time.monotonic() + 60
+            while window.depth_job is not None and time.monotonic() < deadline:
+                self.app.processEvents(); time.sleep(.02)
+            self.assertIsNotNone(window.depth_raw, window.depth_status.text())
+            self.assertTrue(window.depth_dialog.isVisible())
+            raw_depth = window.depth_raw
             window.heightmap_direction.setCurrentIndex(1)
             window.heightmap_strength.setValue(50)
             window.preview_kind.setCurrentText("高度图")
             self.assertEqual(window.output_generation, window.generation)
+            self.assertIs(window.depth_raw, raw_depth)
             target = root / "height.png"
             with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName", return_value=(str(target), "")), \
                  patch("lumina_pendant_prep.app.QMessageBox.information"):
@@ -264,8 +272,14 @@ class GuiSmokeTests(unittest.TestCase):
                 x, y = result.width // 2, result.height // 2
                 self.assertEqual(window.output_canvas.image.pixelColor(x, y).red(), result.getpixel((x, y)))
             self.assertTrue(window._project_data()["heightmap_enabled"])
-            self.assertTrue(window._project_data()["heightmap_dark_high"])
+            self.assertTrue(window._project_data()["heightmap_far_high"])
             self.assertEqual(window._project_data()["heightmap_strength_percent"], 50)
+            self.assertEqual([p.name for p in root.iterdir()], ["height.png"])
+            self.assertTrue(window.open_image(str(Path(__file__).parent / "fixtures" / "cat-photo.jpg")))
+            self.assertIsNone(window.depth_raw)
+            self.assertIsNone(window.depth_view.image)
+            self.assertFalse(window.depth_dialog.isVisible())
+            self.assertEqual([p.name for p in root.iterdir()], ["height.png"])
             window.close()
 
     def test_multiframe_photo_discloses_selected_primary_or_first_page(self):

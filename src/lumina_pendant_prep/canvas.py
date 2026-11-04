@@ -30,6 +30,7 @@ class ImageCanvas(QWidget):
         self.interactive = interactive
         self.mode = "crop"
         self.image: QImage | None = None
+        self.empty_message = "打开照片，或将图片拖到这里"
         self.display_scale: float | None = None
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.hole = (0.5, 0.12)
@@ -80,7 +81,7 @@ class ImageCanvas(QWidget):
         painter.fillRect(self.rect(), QColor("#20252b"))
         if self.image is None:
             painter.setPen(QColor("#abb4bf"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "打开照片，或将图片拖到这里")
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.empty_message)
             return
         rect = self._image_rect()
         cell = 12

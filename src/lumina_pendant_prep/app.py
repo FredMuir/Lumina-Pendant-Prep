@@ -15,14 +15,14 @@ from PySide6.QtGui import QAction, QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox, QCheckBox,
-    QColorDialog, QProgressBar, QScrollArea, QSplitter, QVBoxLayout, QWidget,
+    QColorDialog, QDialog, QProgressBar, QScrollArea, QSplitter, QVBoxLayout, QWidget,
 )
 
 from .canvas import ImageCanvas
 from . import __version__
 from .cleanup import CleanupSettings, ProcessingCancelled, simplify_image
 from .image_io import open_rgba, SRGB_PROFILE
-from .heightmap import make_heightmap
+from .depth import estimate_relative_depth, align_depth, depth_heightmap
 from .project import load_project, save_project, source_path_for_project, resolve_project_source
 from .render import (PendantSettings, crop_pixel_box, hole_has_clearance, hole_has_opaque_surrounding,
                      make_pendant, pendant_pixel_width)
@@ -110,6 +110,42 @@ class PreviewJob(QRunnable):
             self.signals.failed.emit(self.generation, str(exc))
 
 
+class DepthSignals(QObject):
+    finished = Signal(int, object)
+    failed = Signal(int, str)
+    cancelled = Signal(int)
+
+
+class DepthJob(QRunnable):
+    def __init__(self, generation, image, processed_size, output, pendant):
+        super().__init__()
+        self.generation = generation
+        self.image = image
+        self.processed_size = processed_size
+        self.output = output
+        self.pendant = pendant
+        self.signals = DepthSignals()
+        self.cancel_requested = Event()
+
+    def cancel(self):
+        self.cancel_requested.set()
+
+    def run(self):
+        try:
+            source = self.image
+            if source.size != self.processed_size:
+                source = source.resize(self.processed_size, Image.Resampling.LANCZOS)
+            depth = estimate_relative_depth(source, self.cancel_requested.is_set)
+            result = align_depth(depth, self.output, self.pendant)
+            if self.cancel_requested.is_set():
+                raise InterruptedError()
+            self.signals.finished.emit(self.generation, result)
+        except InterruptedError:
+            self.signals.cancelled.emit(self.generation)
+        except Exception as exc:
+            self.signals.failed.emit(self.generation, str(exc))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -136,6 +172,11 @@ class MainWindow(QMainWindow):
         self.active_job: PreviewJob | None = None
         self.pending_start = False
         self.preview_pendant: PendantSettings | None = None
+        self.depth_raw: Image.Image | None = None
+        self.depth_generation = -1
+        self.depth_job: DepthJob | None = None
+        self.depth_dialog: QDialog | None = None
+        self.depth_view: ImageCanvas | None = None
         self.undo_stack: list[dict] = []
         self.redo_stack: list[dict] = []
         self._history_current: dict | None = None
@@ -239,11 +280,15 @@ class MainWindow(QMainWindow):
 
         height_group = QGroupBox("Lumina 浮雕高度图")
         height_form = QFormLayout(height_group)
-        self.heightmap_enabled = QCheckBox("启用高度图导出")
+        self.heightmap_enabled = QCheckBox("启用 AI 深度高度图")
         self.heightmap_direction = QComboBox()
-        self.heightmap_direction.addItems(["浅色凸起", "深色凸起"])
+        self.heightmap_direction.addItems(["近处凸起", "远处凸起"])
         self.heightmap_strength = QSpinBox(); self.heightmap_strength.setRange(0, 200); self.heightmap_strength.setValue(100); self.heightmap_strength.setSuffix("%")
-        self.heightmap_strength.setToolTip("按比例调整灰度高度：100% 为原亮度，超过 100% 可能截断高亮；最终毫米高度由 Lumina 设置。")
+        self.heightmap_strength.setToolTip("按比例调整相对深度：超过 100% 可能截断高值；最终毫米高度由 Lumina 设置。")
+        self.heightmap_generate_button = QPushButton("生成 AI 深度图")
+        self.heightmap_generate_button.clicked.connect(self.generate_depth)
+        self.heightmap_preview_button = QPushButton("单独预览深度图")
+        self.heightmap_preview_button.clicked.connect(self.show_depth_preview)
         self.heightmap_export_button = QPushButton("导出浮雕高度图 PNG")
         self.heightmap_export_button.clicked.connect(self.export_heightmap)
         self.heightmap_enabled.toggled.connect(self._heightmap_options_changed)
@@ -252,8 +297,13 @@ class MainWindow(QMainWindow):
         height_form.addRow(self.heightmap_enabled)
         height_form.addRow("高度方向", self.heightmap_direction)
         height_form.addRow("高度图强度", self.heightmap_strength)
+        height_form.addRow(self.heightmap_generate_button)
+        height_form.addRow(self.heightmap_preview_button)
         height_form.addRow(self.heightmap_export_button)
-        hint = QLabel("根据处理结果的亮度生成；黑色低、白色高，不代表真实景深。")
+        self.depth_status = QLabel("仅在本机估计相对深度，不上传照片。")
+        self.depth_status.setWordWrap(True)
+        height_form.addRow(self.depth_status)
+        hint = QLabel("AI 根据原图估计物体前后关系；深度可能有误，并非实测距离。")
         hint.setWordWrap(True)
         height_form.addRow(hint)
         control_layout.addWidget(height_group)
@@ -411,9 +461,16 @@ class MainWindow(QMainWindow):
 
     def _heightmap_options_changed(self, *_):
         enabled = self.heightmap_enabled.isChecked()
+        if not enabled and self.depth_job is not None:
+            self.depth_job.cancel()
         self.heightmap_direction.setEnabled(enabled)
         self.heightmap_strength.setEnabled(enabled)
-        self.heightmap_export_button.setEnabled(enabled)
+        ready = self.depth_raw is not None and self.depth_generation == self.generation
+        self.heightmap_generate_button.setEnabled(enabled and self.depth_job is None)
+        self.heightmap_preview_button.setEnabled(enabled and ready)
+        self.heightmap_export_button.setEnabled(enabled and ready)
+        if self.depth_view is not None and self.depth_dialog is not None and self.depth_dialog.isVisible() and ready:
+            self.depth_view.set_image(self._current_depth_heightmap())
         if hasattr(self, "preview_kind") and self.preview_kind.currentIndex() == 1:
             self._refresh_output_canvas()
         if hasattr(self, "_history_current") and self.source is not None:
@@ -559,6 +616,7 @@ class MainWindow(QMainWindow):
             return False
         if self.active_job is not None:
             self.active_job.cancel()
+        self._invalidate_depth()
         self.pending_start = False
         self.timer.stop()
         with QSignalBlocker(self.processing_toggle):
@@ -735,6 +793,7 @@ class MainWindow(QMainWindow):
             self._sync_geometry()
             self._update_status()
             self.generation += 1
+            self._invalidate_depth()
             self.timer.stop()
             self.pending_start = False
             if self.active_job is not None:
@@ -855,6 +914,7 @@ class MainWindow(QMainWindow):
         self.progress_timer.stop()
         self.pending_start = False
         self.generation += 1
+        self._invalidate_depth()
         if self.active_job is not None:
             self.active_job.cancel()
         super().closeEvent(event)
@@ -899,10 +959,11 @@ class MainWindow(QMainWindow):
             return
         preview = self.output
         if self.preview_kind.currentText() == "高度图":
-            preview = make_heightmap(self.output, self.heightmap_direction.currentIndex() == 1,
-                                     self.heightmap_strength.value() / 100.0)
+            preview = self._current_depth_heightmap() if self.depth_raw is not None and self.depth_generation == self.generation else None
+            self.output_canvas.empty_message = "启用并生成 AI 深度图后可预览"
             self.output_canvas.set_image(preview)
             return
+        self.output_canvas.empty_message = "打开照片，或将图片拖到这里"
         mask = (self.preview_changed, self.preview_quantized, self.preview_merged)[self.highlight_mode.currentIndex()]
         if self.highlight_toggle.isChecked() and mask is not None and self.prepared is not None and self.preview_pendant is not None:
             tint = Image.new("RGBA", self.prepared.size, (255, 74, 65, 0))
@@ -966,7 +1027,7 @@ class MainWindow(QMainWindow):
             self.hole_border_mm.setValue(data.get("hole_border_mm", .5))
             self.hole_border_color = data.get("hole_border_color", "#ffffff")
             self.heightmap_enabled.setChecked(data.get("heightmap_enabled", False))
-            self.heightmap_direction.setCurrentIndex(1 if data.get("heightmap_dark_high", False) else 0)
+            self.heightmap_direction.setCurrentIndex(1 if data.get("heightmap_far_high", False) else 0)
             self.heightmap_strength.setValue(data.get("heightmap_strength_percent", 100))
             self._heightmap_options_changed()
             self._update_border_buttons()
@@ -1021,11 +1082,92 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
 
+    def _invalidate_depth(self):
+        if self.depth_job is not None:
+            self.depth_job.cancel()
+        self.depth_raw = None
+        self.depth_generation = -1
+        if self.depth_view is not None:
+            self.depth_view.set_image(None)
+        if self.depth_dialog is not None:
+            self.depth_dialog.hide()
+        if hasattr(self, "heightmap_generate_button"):
+            self.depth_status.setText("照片或配置已变化，请重新生成 AI 深度图。" if self.source is not None else "仅在本机估计相对深度，不上传照片。")
+            self._heightmap_options_changed()
+
+    def generate_depth(self):
+        if not self.heightmap_enabled.isChecked() or self.depth_job is not None:
+            return
+        if (self.source is None or self.prepared is None or self.output is None or
+                self.preview_pendant is None or self.output_generation != self.generation):
+            QMessageBox.information(self, "请先处理照片", "请先点击开始处理并等待彩色结果完成，再生成 AI 深度图。")
+            return
+        job = DepthJob(self.generation, self.source, self.prepared.size, self.output, self.preview_pendant)
+        self.depth_job = job
+        job.signals.finished.connect(self._depth_ready)
+        job.signals.failed.connect(self._depth_failed)
+        job.signals.cancelled.connect(self._depth_cancelled)
+        self.depth_status.setText("正在本机估计深度，可能需要数秒；照片不会上传或写入缓存。")
+        self._heightmap_options_changed()
+        self.pool.start(job)
+
+    def _depth_ready(self, generation, depth):
+        self.depth_job = None
+        if generation != self.generation or self.output is None:
+            self._heightmap_options_changed()
+            return
+        self.depth_raw = depth
+        self.depth_generation = generation
+        self.depth_status.setText("AI 相对深度已生成；请检查物体前后关系。")
+        self._heightmap_options_changed()
+        if self.heightmap_enabled.isChecked():
+            self.show_depth_preview()
+
+    def _depth_failed(self, generation, message):
+        self.depth_job = None
+        self._heightmap_options_changed()
+        if generation == self.generation:
+            self.depth_status.setText(f"深度估计失败：{message}")
+
+    def _depth_cancelled(self, generation):
+        self.depth_job = None
+        self._heightmap_options_changed()
+
+    def _current_depth_heightmap(self):
+        return depth_heightmap(self.depth_raw, self.output, self.heightmap_direction.currentIndex() == 1,
+                               self.heightmap_strength.value() / 100.0)
+
+    def show_depth_preview(self):
+        if self.depth_raw is None or self.depth_generation != self.generation:
+            return
+        if self.depth_dialog is None:
+            self.depth_dialog = QDialog(self)
+            self.depth_dialog.setWindowTitle("AI 深度高度图预览")
+            self.depth_dialog.resize(800, 650)
+            layout = QVBoxLayout(self.depth_dialog)
+            text = QLabel("黑色低、白色高。相对深度由 AI 估计，请检查前后关系；实际高度在 Lumina 中设置。")
+            text.setWordWrap(True)
+            layout.addWidget(text)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            self.depth_view = ImageCanvas(interactive=False)
+            scroll.setWidget(self.depth_view)
+            layout.addWidget(scroll)
+            export = QPushButton("导出深度高度图 PNG")
+            export.clicked.connect(self.export_heightmap)
+            layout.addWidget(export)
+        self.depth_view.set_image(self._current_depth_heightmap())
+        self.depth_dialog.show()
+        self.depth_dialog.raise_()
+
     def export_heightmap(self):
         if not self.heightmap_enabled.isChecked():
             return
         if self.output is None or self.output_generation != self.generation:
             QMessageBox.information(self, "预览尚未更新", "请先点击开始处理，完成后再导出高度图。")
+            return
+        if self.depth_raw is None or self.depth_generation != self.generation:
+            QMessageBox.information(self, "尚无深度图", "请先点击生成 AI 深度图。")
             return
         if self.hole_toggle.currentIndex() == 0 and not self.hole_safe:
             QMessageBox.information(self, "挂绳孔无法裁切", "请先调整孔位置或关闭挂绳孔，然后重新处理。")
@@ -1047,8 +1189,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "无法导出", "高度图不能覆盖原照片或刚导出的彩色图片，请选择其他文件名。")
             return
         try:
-            heightmap = make_heightmap(self.output, self.heightmap_direction.currentIndex() == 1,
-                                       self.heightmap_strength.value() / 100.0)
+            heightmap = self._current_depth_heightmap()
             filename = self.write_png(heightmap, filename)
             QMessageBox.information(self, "高度图已导出", f"已保存：\n{filename}\n\n"
                                     "在 Lumina 中先导入彩色 PNG 并完成普通预览，再启用浮雕、选择“根据高度图”并上传本文件。"
@@ -1117,7 +1258,7 @@ class MainWindow(QMainWindow):
             "hole_border_enabled": self.hole_border_toggle.isChecked(),
             "hole_border_mm": self.hole_border_mm.value(), "hole_border_color": self.hole_border_color,
             "heightmap_enabled": self.heightmap_enabled.isChecked(),
-            "heightmap_dark_high": self.heightmap_direction.currentIndex() == 1,
+            "heightmap_far_high": self.heightmap_direction.currentIndex() == 1,
             "heightmap_strength_percent": self.heightmap_strength.value(),
         }
 
@@ -1178,7 +1319,8 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    smoke = len(sys.argv) == 4 and sys.argv[1] == "--smoke-test"
+    smoke = len(sys.argv) == 4 and sys.argv[1] in ("--smoke-test", "--smoke-depth")
+    smoke_depth = smoke and sys.argv[1] == "--smoke-depth"
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet("""
@@ -1204,12 +1346,24 @@ def main():
         if not window.open_image(source):
             sys.exit(2)
         window.processing_toggle.setChecked(True)
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + 110
+        depth_started = [False]
 
         def finish_smoke():
             if window.output is not None and window.output_generation == window.generation:
+                if smoke_depth:
+                    if not depth_started[0]:
+                        depth_started[0] = True
+                        window.heightmap_enabled.setChecked(True)
+                        window.generate_depth()
+                    if window.depth_raw is None:
+                        if time.monotonic() >= deadline or window.depth_status.text().startswith("深度估计失败"):
+                            app.exit(5)
+                        else:
+                            QTimer.singleShot(100, finish_smoke)
+                        return
                 try:
-                    window.write_png(window.output, destination)
+                    window.write_png(window._current_depth_heightmap() if smoke_depth else window.output, destination)
                 except Exception:
                     app.exit(3)
                     return

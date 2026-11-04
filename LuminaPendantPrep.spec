@@ -1,7 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
+import os
+from pathlib import Path
 
 datas = [('src/lumina_pendant_prep/assets', 'lumina_pendant_prep/assets')]
+model = Path(os.environ['LOCALAPPDATA']) / 'LuminaPendantPrep/models/depth-anything-v2-small-int8.onnx'
+if not model.is_file():
+    raise SystemExit('Missing depth model; run scripts/fetch_depth_model.ps1 first.')
+datas.append((str(model), 'lumina_pendant_prep/assets/models'))
 binaries = []
 hiddenimports = []
 # PyInstaller's Qt hooks collect the modules actually imported by the app.

@@ -29,6 +29,7 @@ function Remove-ManagedPath([string]$path) {
 
 $dist = Join-Path $buildRoot 'dist'
 $work = Join-Path $buildRoot 'work'
+& (Join-Path $PSScriptRoot 'fetch_depth_model.ps1')
 & $python -m PyInstaller --noconfirm --distpath $dist --workpath $work LuminaPendantPrep.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed; staging kept at $buildRoot" }
 $candidate = Join-Path $dist 'LuminaPendantPrep'
@@ -44,6 +45,12 @@ try {
     if ($proc.ExitCode -ne 0) { throw "Candidate smoke test failed: $($proc.ExitCode)" }
     & $python -c "from PIL import Image; import sys; p=Image.open(sys.argv[1]); assert p.size==(1920,1080) and p.mode=='RGBA'; assert p.getpixel((0,0))[3]==0 and p.getpixel((960,130))[3]==0" $smoke
     if ($LASTEXITCODE -ne 0) { throw 'Candidate PNG validation failed.' }
+    $depthSmoke = Join-Path $buildRoot 'depth-smoke.png'
+    $proc = Start-Process -FilePath $exe -ArgumentList @('--smoke-depth', ('"' + $photo + '"'), ('"' + $depthSmoke + '"')) -WindowStyle Hidden -PassThru
+    if (-not $proc.WaitForExit(120000)) { $proc.Kill(); throw 'Candidate depth smoke test timed out.' }
+    if ($proc.ExitCode -ne 0) { throw "Candidate depth smoke test failed: $($proc.ExitCode)" }
+    & $python -c "from PIL import Image; import sys; p=Image.open(sys.argv[1]); assert p.size==(1920,1080) and p.mode=='L'; assert p.getpixel((960,130))==0 and p.getextrema()[1]>0" $depthSmoke
+    if ($LASTEXITCODE -ne 0) { throw 'Candidate depth PNG validation failed.' }
 } finally { $env:QT_QPA_PLATFORM = $oldQtPlatform }
 
 Move-Item -LiteralPath $candidate -Destination $destination

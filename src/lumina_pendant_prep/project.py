@@ -95,7 +95,7 @@ def load_project(path: str | Path) -> dict[str, Any]:
             raise ValueError(f"Invalid {key}")
     if "max_dimension" in data and (type(data["max_dimension"]) is not int or data["max_dimension"] not in (0, 2400, 4096)):
         raise ValueError("Invalid output resolution")
-    for key in ("cleanup", "hole_enabled", "outer_border_enabled", "hole_border_enabled", "protect_distinct_colors", "preserve_flat_colors", "heightmap_enabled", "heightmap_dark_high"):
+    for key in ("cleanup", "hole_enabled", "outer_border_enabled", "hole_border_enabled", "protect_distinct_colors", "preserve_flat_colors", "heightmap_enabled", "heightmap_dark_high", "heightmap_far_high"):
         if key in data and type(data[key]) is not bool:
             raise ValueError(f"Invalid {key}")
     for key in ("outer_border_color", "hole_border_color"):

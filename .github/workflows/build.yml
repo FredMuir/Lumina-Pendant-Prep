@@ -21,6 +21,9 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install app and packager
         run: python -m pip install --upgrade pip && python -m pip install . pyinstaller
+      - name: Fetch verified depth model
+        shell: pwsh
+        run: ./scripts/fetch_depth_model.ps1
       - name: Run Windows-compatible test suite
         run: python -m unittest discover -s tests -v
         env:
@@ -43,6 +46,12 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Packaged app exited with code $($process.ExitCode)" }
           python -c "from PIL import Image; import sys; p=Image.open(sys.argv[1]); assert p.mode == 'RGBA' and p.size == (1920,1080); assert p.getpixel((0,0))[3] == 0; assert p.getpixel((960,130))[3] == 0; print('Packaged PNG verified')" $output
           if ($LASTEXITCODE -ne 0) { throw 'Packaged PNG verification failed' }
+          $depth = Join-Path $env:RUNNER_TEMP 'lumina-depth-smoke.png'
+          $process = Start-Process -FilePath $exe -ArgumentList @('--smoke-depth', ('"' + $photo + '"'), ('"' + $depth + '"')) -PassThru -WindowStyle Hidden
+          if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Packaged depth test timed out' }
+          if ($process.ExitCode -ne 0) { throw "Packaged depth test failed: $($process.ExitCode)" }
+          python -c "from PIL import Image; import sys; p=Image.open(sys.argv[1]); assert p.mode=='L' and p.size==(1920,1080); assert p.getpixel((960,130))==0 and p.getextrema()[1]>0" $depth
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged depth PNG verification failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64
