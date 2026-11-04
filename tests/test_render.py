@@ -1,4 +1,6 @@
 import unittest
+from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -7,6 +9,26 @@ from lumina_pendant_prep.render import PendantSettings, hole_has_clearance, hole
 
 
 class PendantRenderTests(unittest.TestCase):
+    def test_borders_do_not_cover_real_photo_and_hole_remains_clear(self):
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        with Image.open(photo) as image:
+            source = image.convert("RGBA").resize((320, 180), Image.Resampling.LANCZOS)
+        settings = PendantSettings(crop=(0, 0, 1, 1), shape="Rectangle", target_width_mm=60,
+                                   hole_x=.5, hole_y=.3, hole_diameter_mm=6)
+        base = make_pendant(source, settings)
+        bordered = make_pendant(source, replace(settings, outer_border_enabled=True, outer_border_mm=2,
+                                                outer_border_color="#ff0000", hole_border_enabled=True,
+                                                hole_border_mm=.5, hole_border_color="#0000ff"))
+        pad = round(2 * 320 / 60)
+        self.assertEqual(bordered.size, (320 + 2 * pad, 180 + 2 * pad))
+        self.assertEqual(bordered.info["dpi"], base.info["dpi"])
+        interior = np.asarray(bordered.crop((pad, pad, pad + 320, pad + 180)))
+        before = np.asarray(base)
+        np.testing.assert_array_equal(interior[before[:, :, 3] > 0], before[before[:, :, 3] > 0])
+        self.assertEqual(interior[54, 160, 3], 0)
+        self.assertTrue(np.any(np.all(interior[:, :, :3] == (0, 0, 255), axis=2) & (interior[:, :, 3] > 0)))
+        self.assertEqual(bordered.getpixel((pad + 160, 0)), (255, 0, 0, 255))
+
     def test_small_hole_and_outside_corner_are_fully_transparent(self):
         image = Image.new("RGBA", (96, 64), (70, 130, 190, 255))
         result = make_pendant(image, PendantSettings(

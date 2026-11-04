@@ -9,3 +9,9 @@
 - 来源：[Wikimedia Commons 文件页面](https://commons.wikimedia.org/wiki/File:FLOWER_PIC.jpg)，作者标注为本人作品并以 CC0 1.0 发布。
 - 原始文件 SHA-256：`445ab6744850f9278e979f63eddf7ee1a24cd6d6a0f15ecc40d5c0640954ab6`。
 - 用于另一种实拍题材、竖构图的净化回归；测试中按比例缩小，不能代替打印效果评估。
+
+- `dog-photo.jpg`：ContaDeletada2906 拍摄的狗，960 × 1600 JPEG；[Wikimedia Commons 文件页面](https://commons.wikimedia.org/wiki/File:Photo_of_a_dog.jpg)，作者标注为本人作品、CC0 1.0。
+- 原始文件 SHA-256：`5cf614d2863ca8f86b6162c7b477fd2690adbc101816206c9e675bf36d9962d0`。
+
+- `processor-photo.jpg`：Wikiinger 拍摄的处理器，1210 × 1210 JPEG；[Wikimedia Commons 文件页面](https://commons.wikimedia.org/wiki/File:AMD_A12-9800.jpg)，作者标注为本人作品、CC0 1.0。作为文字和小物件场景的候选。
+- 上游原文件 SHA-256：`c1f078d27da5544e169915157956a334eef5fc1122bc705bedba03d891cc0d96`。仓库文件为去除包括 GPS 在内的 EXIF 元数据后重新编码的照片，SHA-256：`a50aacf48c808c5f524ecc0ff0380f31b9128dca54fb8181de276241c4762639`；不计为新的独立拍摄样本。

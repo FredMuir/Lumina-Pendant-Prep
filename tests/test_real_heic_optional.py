@@ -31,6 +31,7 @@ class RealHeicTests(unittest.TestCase):
         try:
             window.cleanup_toggle.setCurrentText("保留原色")
             self.assertTrue(window.open_image(str(source)))
+            window.processing_toggle.setChecked(True)
             self.assertEqual(window.source.size, (3024, 4032))
             deadline = time.monotonic() + 90
             while window.output_generation != window.generation and time.monotonic() < deadline:
@@ -63,6 +64,7 @@ class RealHeicTests(unittest.TestCase):
         window = MainWindow()
         try:
             self.assertTrue(window.open_image(str(source)))
+            window.processing_toggle.setChecked(True)
             window.timer.stop()
             settings, pendant = window._settings()
             self.assertTrue(pendant.hole_enabled)

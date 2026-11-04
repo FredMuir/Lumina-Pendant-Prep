@@ -8,6 +8,9 @@ from PySide6.QtWidgets import QWidget
 
 def pil_to_qimage(image: Image.Image) -> QImage:
     rgba = image.convert("RGBA")
+    if max(rgba.size) > 2400:
+        rgba = rgba.copy()
+        rgba.thumbnail((2400, 2400), Image.Resampling.LANCZOS)
     data = rgba.tobytes("raw", "RGBA")
     return QImage(data, rgba.width, rgba.height, rgba.width * 4,
                   QImage.Format.Format_RGBA8888).copy()
@@ -35,6 +38,7 @@ class ImageCanvas(QWidget):
         self.drawing_outline = False
         self.drag_start: QPointF | None = None
         self.drag_end: QPointF | None = None
+        self.dragging_hole = False
 
     def set_image(self, image: Image.Image | None) -> None:
         self.image = pil_to_qimage(image) if image else None
@@ -135,6 +139,7 @@ class ImageCanvas(QWidget):
         if point is None:
             return
         if self.mode == "hole":
+            self.dragging_hole = True
             self.holeMoved.emit(*point)
         elif self.mode == "outline":
             if not self.drawing_outline:
@@ -149,11 +154,19 @@ class ImageCanvas(QWidget):
             self.update()
 
     def mouseMoveEvent(self, event):
+        if self.dragging_hole:
+            point = self._point_to_image(event.position())
+            if point is not None:
+                self.holeMoved.emit(*point)
+            return
         if self.drag_start is not None:
             self.drag_end = event.position()
             self.update()
 
     def mouseReleaseEvent(self, event):
+        if self.dragging_hole:
+            self.dragging_hole = False
+            return
         if self.drag_start is None or self.drag_end is None:
             return
         rect = self._image_rect()

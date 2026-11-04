@@ -23,6 +23,23 @@ class GuiSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_open_does_not_start_processing_until_enabled(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        window = MainWindow()
+        self.assertTrue(window.open_image(str(photo)))
+        self.assertFalse(window.processing_toggle.isChecked())
+        self.assertFalse(window.timer.isActive())
+        self.assertFalse(window.preview_running)
+        self.assertIsNone(window.output)
+        window.processing_toggle.setChecked(True)
+        deadline = time.monotonic() + 20
+        while window.output_generation != window.generation and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.02)
+        self.assertIsNotNone(window.output)
+        self.assertEqual(window.output_generation, window.generation)
+        window.close()
+
     def test_multiframe_photo_discloses_selected_primary_or_first_page(self):
         fixtures = Path(__file__).parent / "fixtures"
         with Image.open(fixtures / "cat-photo.jpg") as cat, Image.open(fixtures / "flower-photo.jpg") as flower:
@@ -34,8 +51,10 @@ class GuiSmokeTests(unittest.TestCase):
             images[0].save(tiff, format="TIFF", save_all=True, append_images=[images[1]])
             window = MainWindow()
             self.assertTrue(window.open_image(str(heif)))
+            window.processing_toggle.setChecked(True)
             self.assertIn("仅加载主图（第 2 张）", window.source_info.text())
             self.assertTrue(window.open_image(str(tiff)))
+            window.processing_toggle.setChecked(True)
             self.assertIn("仅加载第一页（第 1 张）", window.source_info.text())
             window.close()
 
@@ -46,6 +65,7 @@ class GuiSmokeTests(unittest.TestCase):
         window.cleanup_toggle.setCurrentText("保留原色")
         window.show()
         self.assertTrue(window.open_image(str(photo)))
+        window.processing_toggle.setChecked(True)
         deadline = time.monotonic() + 20
         while window.output_generation != window.generation and time.monotonic() < deadline:
             self.app.processEvents()
@@ -75,6 +95,7 @@ class GuiSmokeTests(unittest.TestCase):
             window.shape.setCurrentText("矩形")
             window.hole_toggle.setCurrentIndex(1)
             self.assertTrue(window.open_image(str(photo)))
+            window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 20
             while window.output_generation != window.generation and time.monotonic() < deadline:
                 self.app.processEvents()
@@ -102,6 +123,7 @@ class GuiSmokeTests(unittest.TestCase):
                 original.resize((320, 180), Image.Resampling.LANCZOS).save(path)
             window = MainWindow()
             self.assertTrue(window.open_image(str(path)))
+            window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 20
             while window.output_generation != window.generation and time.monotonic() < deadline:
                 self.app.processEvents()
@@ -114,8 +136,11 @@ class GuiSmokeTests(unittest.TestCase):
             self.app.processEvents()
             self.assertGreater(window.output_scroll.horizontalScrollBar().maximum(), 0)
             self.assertGreater(window.output_scroll.verticalScrollBar().maximum(), 0)
+            self.assertGreater(window.input_scroll.horizontalScrollBar().maximum(), 0)
             window.output_scroll.horizontalScrollBar().setValue(window.output_scroll.horizontalScrollBar().maximum())
             window.output_scroll.verticalScrollBar().setValue(window.output_scroll.verticalScrollBar().maximum())
+            self.assertEqual(window.input_scroll.horizontalScrollBar().value(), window.input_scroll.horizontalScrollBar().maximum())
+            self.assertEqual(window.input_scroll.verticalScrollBar().value(), window.input_scroll.verticalScrollBar().maximum())
             self.assertIn("量化改变", window.status.text())
             self.assertIn("区域合并改变", window.status.text())
             window.highlight_toggle.setChecked(True)
@@ -135,6 +160,7 @@ class GuiSmokeTests(unittest.TestCase):
         photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
         window = MainWindow()
         self.assertTrue(window.open_image(str(photo)))
+        window.processing_toggle.setChecked(True)
         window.timer.stop()
         window._start_preview()
         old_job = window.active_job
@@ -160,6 +186,7 @@ class GuiSmokeTests(unittest.TestCase):
             window = MainWindow()
             window.cleanup_toggle.setCurrentText("保留原色")
             self.assertTrue(window.open_image(str(source)))
+            window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 20
             while window.output_generation != window.generation and time.monotonic() < deadline:
                 self.app.processEvents()
@@ -183,6 +210,7 @@ class GuiSmokeTests(unittest.TestCase):
             window.shape.setCurrentText("矩形")
             window.hole_toggle.setCurrentIndex(1)
             window.open_image(str(path))
+            window.processing_toggle.setChecked(True)
             window.show()
             self.app.processEvents()
             window.crop_tool.setCurrentText("拖动添加保护区域")
@@ -226,6 +254,7 @@ class GuiSmokeTests(unittest.TestCase):
             Image.new("RGB", (96, 64), (70, 130, 190)).save(source, format="HEIF", quality=80)
             window = MainWindow()
             self.assertTrue(window.open_image(str(source)))
+            window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 10
             while window.output is None and time.monotonic() < deadline:
                 self.app.processEvents()
@@ -276,6 +305,7 @@ class GuiSmokeTests(unittest.TestCase):
         window.nozzle_mm.setCurrentIndex(2)
         window.cleanup_toggle.setCurrentText("保留原色")
         self.assertTrue(window.open_image(str(photo)))
+        window.processing_toggle.setChecked(True)
         window._apply_gentle_preset()
         self.assertEqual(window.colors.value(), 96)
         self.assertEqual(window.color_delta.value(), 2)
@@ -295,6 +325,7 @@ class GuiSmokeTests(unittest.TestCase):
             Image.new("RGB", (40, 40), "red").save(path)
             window = MainWindow()
             window.open_image(str(path))
+            window.processing_toggle.setChecked(True)
             window.shape.setCurrentText("自定义多边形")
             window.timer.stop()
             window._start_preview()
@@ -339,6 +370,7 @@ class GuiSmokeTests(unittest.TestCase):
             original_bytes = source.read_bytes()
             window = MainWindow()
             self.assertTrue(window.open_image(str(source)))
+            window.processing_toggle.setChecked(True)
             window.hole_toggle.setCurrentIndex(1)
             window.timer.stop()
             window.output = window.source.copy()
@@ -372,6 +404,7 @@ class GuiSmokeTests(unittest.TestCase):
             window = MainWindow()
             window.cleanup_toggle.setCurrentText("保留原色")
             self.assertTrue(window.open_image(str(photo)))
+            window.processing_toggle.setChecked(True)
             window._set_hole(0.01, 0.01)
             deadline = time.monotonic() + 20
             while window.output_generation != window.generation and time.monotonic() < deadline:
@@ -404,6 +437,7 @@ class GuiSmokeTests(unittest.TestCase):
             window = MainWindow()
             window.cleanup_toggle.setCurrentText("保留原色")
             self.assertTrue(window.open_image(str(photo)))
+            window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 20
             while window.output_generation != window.generation and time.monotonic() < deadline:
                 self.app.processEvents()
@@ -429,6 +463,7 @@ class GuiSmokeTests(unittest.TestCase):
             window = MainWindow()
             window.cleanup_toggle.setCurrentText("保留原色")
             self.assertTrue(window.open_image(str(photo)))
+            window.processing_toggle.setChecked(True)
 
             def wait_for_preview():
                 deadline = time.monotonic() + 20
@@ -457,6 +492,7 @@ class GuiSmokeTests(unittest.TestCase):
             with patch("lumina_pendant_prep.app.QFileDialog.getOpenFileName", return_value=(str(project), "")):
                 window.load_project_dialog()
             self.assertAlmostEqual(window.hole_compensation_mm.value(), .6)
+            window.processing_toggle.setChecked(True)
             wait_for_preview()
             with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName",
                        return_value=(str(root / "compensated.png"), "")), \
@@ -464,6 +500,57 @@ class GuiSmokeTests(unittest.TestCase):
                 window.export_png()
             self.assertIn("目标 4 + 补偿 0.6 mm", notice.call_args.args[2])
             window.close()
+
+    def test_hole_position_and_border_settings_persist(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        with tempfile.TemporaryDirectory() as directory:
+            window = MainWindow()
+            self.assertTrue(window.open_image(str(photo)))
+            window.hole_x_percent.setValue(45)
+            window.hole_y_percent.setValue(20)
+            self.assertEqual(window.hole, (.45, .2))
+            window.outer_border_toggle.setChecked(True)
+            window.outer_border_mm.setValue(2)
+            window.outer_border_color = "#ff0000"
+            window.hole_border_toggle.setChecked(True)
+            window.hole_border_mm.setValue(.5)
+            window.hole_border_color = "#0000ff"
+            window.processing_toggle.setChecked(True)
+            deadline = time.monotonic() + 30
+            while window.output_generation != window.generation and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(.02)
+            self.assertEqual(window.output_generation, window.generation, window.status.text())
+            self.assertTrue(window.hole_safe)
+            self.assertGreater(window.output.width, window.source.width)
+            project = Path(directory) / "border.lpproj"
+            save_project(project, window._project_data())
+            with patch("lumina_pendant_prep.app.QFileDialog.getOpenFileName", return_value=(str(project), "")):
+                window.load_project_dialog()
+            self.assertFalse(window.processing_toggle.isChecked())
+            self.assertEqual(window.hole, (.45, .2))
+            self.assertTrue(window.outer_border_toggle.isChecked())
+            self.assertTrue(window.hole_border_toggle.isChecked())
+            self.assertEqual(window.outer_border_color, "#ff0000")
+            self.assertEqual(window.hole_border_color, "#0000ff")
+            window.close()
+
+    def test_drag_hole_updates_numeric_position(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        window = MainWindow()
+        window.show()
+        self.assertTrue(window.open_image(str(photo)))
+        self.app.processEvents()
+        window.crop_tool.setCurrentText("点击设置孔位置")
+        rect = window.input_canvas._image_rect()
+        start = QPoint(round(rect.x() + rect.width() * .4), round(rect.y() + rect.height() * .2))
+        end = QPoint(round(rect.x() + rect.width() * .6), round(rect.y() + rect.height() * .3))
+        QTest.mousePress(window.input_canvas, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(window.input_canvas, end)
+        QTest.mouseRelease(window.input_canvas, Qt.MouseButton.LeftButton, pos=end)
+        self.assertAlmostEqual(window.hole_x_percent.value(), 60, delta=1)
+        self.assertAlmostEqual(window.hole_y_percent.value(), 30, delta=1)
+        window.close()
 
     def test_project_relinks_moved_photo_and_preserves_current_image_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -512,6 +599,7 @@ class GuiSmokeTests(unittest.TestCase):
             Image.new("RGBA", (80, 60), (30, 150, 210, 255)).save(path)
             window = MainWindow()
             window.open_image(str(path))
+            window.processing_toggle.setChecked(True)
             deadline = time.monotonic() + 10
             while window.output is None and time.monotonic() < deadline:
                 self.app.processEvents()

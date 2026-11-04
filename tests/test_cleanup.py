@@ -9,7 +9,7 @@ from lumina_pendant_prep.cleanup import CleanupSettings, simplify_image, _merge_
 
 class CleanupTests(unittest.TestCase):
     def test_real_photo_cleanup_produces_valid_limited_palette(self):
-        for name in ("cat-photo.jpg", "flower-photo.jpg"):
+        for name in ("cat-photo.jpg", "flower-photo.jpg", "dog-photo.jpg", "processor-photo.jpg"):
             with self.subTest(photo=name):
                 with Image.open(Path(__file__).parent / "fixtures" / name) as photo:
                     source = photo.convert("RGBA")

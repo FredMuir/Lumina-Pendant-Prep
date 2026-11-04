@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from PIL import Image, ImageChops, ImageDraw
+import cv2
+import numpy as np
+from PIL import Image, ImageChops, ImageDraw, ImageColor
 
 
 @dataclass(frozen=True)
@@ -16,6 +18,12 @@ class PendantSettings:
     hole_y: float = 0.12
     hole_diameter_mm: float = 4.0
     polygon: tuple[tuple[float, float], ...] = ()
+    outer_border_enabled: bool = False
+    outer_border_mm: float = 1.0
+    outer_border_color: str = "#ffffff"
+    hole_border_enabled: bool = False
+    hole_border_mm: float = 0.5
+    hole_border_color: str = "#ffffff"
 
 
 def crop_pixel_box(image_size: tuple[int, int], crop: tuple[float, float, float, float]) -> tuple[int, int, int, int]:
@@ -145,16 +153,49 @@ def make_pendant(image: Image.Image, settings: PendantSettings) -> Image.Image:
         draw.polygon(points, fill=255)
     else:
         draw.rectangle((0, 0, w * supersample - 1, h * supersample - 1), fill=255)
+    outline_mask = mask.copy() if settings.outer_border_enabled else None
+    ring = None
     if settings.hole_enabled:
         radius = max(1, round(settings.hole_diameter_mm * scale / 2)) * supersample
         cx = round((settings.hole_x * source_w - offset_x) * supersample)
         cy = round((settings.hole_y * source_h - offset_y) * supersample)
         draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=0)
+        if settings.hole_border_enabled:
+            ring_width = max(1, round(settings.hole_border_mm * scale * supersample))
+            if ring_width >= radius:
+                raise ValueError("孔边框过宽，无法保留透明孔")
+            ring = Image.new("L", mask.size, 0)
+            ring_draw = ImageDraw.Draw(ring)
+            ring_draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=255)
+            inner = radius - ring_width
+            ring_draw.ellipse((cx - inner, cy - inner, cx + inner, cy + inner), fill=0)
     if supersample != 1:
         # Area averaging preserves fully empty pixels. Lanczos ringing can
         # introduce faint nonzero alpha inside holes or outside the outline.
         mask = mask.resize((w, h), Image.Resampling.BOX)
+        if outline_mask is not None:
+            outline_mask = outline_mask.resize((w, h), Image.Resampling.BOX)
+        if ring is not None:
+            ring = ring.resize((w, h), Image.Resampling.BOX)
     cropped.putalpha(ImageChops.multiply(cropped.getchannel("A"), mask))
+    if ring is not None:
+        # The ring lies entirely in the removed hole, preserving picture pixels.
+        ring = ImageChops.multiply(ring, mask.point(lambda value: 255 if value == 0 else 0))
+        color = Image.new("RGBA", cropped.size, ImageColor.getrgb(settings.hole_border_color) + (0,))
+        color.putalpha(ring)
+        cropped = Image.alpha_composite(cropped, color)
+    if outline_mask is not None:
+        pad = max(1, round(settings.outer_border_mm * scale))
+        if (w + 2 * pad) * (h + 2 * pad) > 64_000_000:
+            raise ValueError("外边框和输出尺寸过大，请减小边框宽度或输出分辨率")
+        original = np.asarray(outline_mask, dtype=np.uint8)
+        expanded = cv2.copyMakeBorder(original, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
+        distance = cv2.distanceTransform((expanded == 0).astype(np.uint8), cv2.DIST_L2, 5)
+        outside = ((expanded == 0) & (distance <= pad)).astype(np.uint8) * 255
+        background = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), ImageColor.getrgb(settings.outer_border_color) + (0,))
+        background.putalpha(Image.fromarray(outside, "L"))
+        background.alpha_composite(cropped, (pad, pad))
+        cropped = background
     dpi = 25.4 * w / settings.target_width_mm if settings.target_width_mm > 0 else 300
     cropped.info["dpi"] = (dpi, dpi)
     return cropped
