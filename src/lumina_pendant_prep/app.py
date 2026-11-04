@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import os
+import math
 import tempfile
 import time
 from threading import Event
@@ -201,9 +202,15 @@ class MainWindow(QMainWindow):
         self.quantization_level.currentIndexChanged.connect(self._quantization_level_changed)
         self.colors.valueChanged.connect(self._sync_quantization_level)
         self.color_delta = self._double(2, 0, 40, 1)
-        self.protect_colors = QCheckBox("保留纯色区域和明显不同的小色块")
+        self.protect_flat = QCheckBox("保留纯色区域")
+        self.protect_flat.setChecked(True)
+        self.flat_min_area = QSpinBox(); self.flat_min_area.setRange(1, 1000000); self.flat_min_area.setValue(16)
+        self.flat_min_area.setToolTip("纯色区域至少需要此像素面积，还需满足当前最小特征面积。")
+        self.protect_colors = QCheckBox("保留明显不同的小色块")
         self.protect_colors.setChecked(True)
-        self.protect_colors.setToolTip("保留尺寸足够的连续纯色区域原色，并避免小色块被强行替换成差异明显的邻色；输出颜色数可能超过上限，细节仍可能无法打印。")
+        self.protect_colors.setToolTip("避免小色块被强行替换成色差过大的邻色；保留的细节仍可能无法打印。")
+        self.distinct_delta = self._double(12, 0, 100, 1)
+        self.distinct_delta.setToolTip("小色块只会合并到色差不大于此值的邻色；数值越小，保留越严格。")
         self.resolution = QComboBox()
         self.resolution.addItem("长边 2400 px（推荐）", 2400)
         self.resolution.addItem("长边 4096 px", 4096)
@@ -217,7 +224,10 @@ class MainWindow(QMainWindow):
         form.addRow("颜色量化级别", self.quantization_level)
         form.addRow("颜色上限（不含保护色）", self.colors)
         form.addRow("相近色阈值", self.color_delta)
+        form.addRow(self.protect_flat)
+        form.addRow("纯色最小面积 (像素)", self.flat_min_area)
         form.addRow(self.protect_colors)
+        form.addRow("小色块最大合并色差", self.distinct_delta)
         form.addRow("处理模式", self.cleanup_toggle)
         form.addRow("输出分辨率", self.resolution)
         gentle_preset = QPushButton("温和预设（试用）")
@@ -231,12 +241,16 @@ class MainWindow(QMainWindow):
         self.heightmap_enabled = QCheckBox("启用高度图导出")
         self.heightmap_direction = QComboBox()
         self.heightmap_direction.addItems(["浅色凸起", "深色凸起"])
+        self.heightmap_strength = QSpinBox(); self.heightmap_strength.setRange(0, 200); self.heightmap_strength.setValue(100); self.heightmap_strength.setSuffix("%")
+        self.heightmap_strength.setToolTip("按比例调整灰度高度：100% 为原亮度，超过 100% 可能截断高亮；最终毫米高度由 Lumina 设置。")
         self.heightmap_export_button = QPushButton("导出浮雕高度图 PNG")
         self.heightmap_export_button.clicked.connect(self.export_heightmap)
         self.heightmap_enabled.toggled.connect(self._heightmap_options_changed)
         self.heightmap_direction.currentIndexChanged.connect(self._heightmap_options_changed)
+        self.heightmap_strength.valueChanged.connect(self._heightmap_options_changed)
         height_form.addRow(self.heightmap_enabled)
         height_form.addRow("高度方向", self.heightmap_direction)
+        height_form.addRow("高度图强度", self.heightmap_strength)
         height_form.addRow(self.heightmap_export_button)
         hint = QLabel("根据处理结果的亮度生成；黑色低、白色高，不代表真实景深。")
         hint.setWordWrap(True)
@@ -310,6 +324,9 @@ class MainWindow(QMainWindow):
         headings.addWidget(QLabel("原图 / 裁切操作"))
         headings.addStretch()
         headings.addWidget(QLabel("挂坠 PNG 预览（棋盘格为透明）"))
+        self.preview_kind = QComboBox()
+        self.preview_kind.addItems(["彩色结果", "高度图"])
+        self.preview_kind.currentIndexChanged.connect(self._refresh_output_canvas)
         self.highlight_toggle = QCheckBox("标记已简化区域")
         self.highlight_toggle.toggled.connect(self._refresh_output_canvas)
         headings.addWidget(self.highlight_toggle)
@@ -320,6 +337,8 @@ class MainWindow(QMainWindow):
         preview_layout.addLayout(headings)
         zoom_row = QHBoxLayout()
         zoom_row.addStretch()
+        zoom_row.addWidget(QLabel("预览"))
+        zoom_row.addWidget(self.preview_kind)
         zoom_row.addWidget(QLabel("前后同步缩放"))
         self.output_zoom = QComboBox()
         for label, factor in (("适合窗口", 1), ("2 倍", 2), ("4 倍", 4)):
@@ -340,8 +359,8 @@ class MainWindow(QMainWindow):
         for axis in ("horizontalScrollBar", "verticalScrollBar"):
             left = getattr(self.input_scroll, axis)()
             right = getattr(self.output_scroll, axis)()
-            left.valueChanged.connect(lambda value, a=left, b=right: self._sync_scroll(a, b, value))
-            right.valueChanged.connect(lambda value, a=right, b=left: self._sync_scroll(a, b, value))
+            left.valueChanged.connect(lambda value, axis=axis: self._sync_scroll(axis, True, value))
+            right.valueChanged.connect(lambda value, axis=axis: self._sync_scroll(axis, False, value))
         panes.addWidget(self.input_scroll); panes.addWidget(self.output_scroll)
         preview_layout.addWidget(panes, 1)
         self.source_info = QLabel("支持 JPEG、PNG、WebP、BMP、TIFF、HEIC/HEIF、AVIF")
@@ -361,10 +380,13 @@ class MainWindow(QMainWindow):
         self.outer_border_toggle.toggled.connect(self._schedule_preview)
         self.hole_border_toggle.toggled.connect(self._schedule_preview)
         self.protect_colors.toggled.connect(self._schedule_preview)
+        self.protect_flat.toggled.connect(self._schedule_preview)
+        self.protect_colors.toggled.connect(self._update_cleanup_controls)
+        self.protect_flat.toggled.connect(self._update_cleanup_controls)
         self.crop_tool.currentIndexChanged.connect(
             lambda i: self.input_canvas.set_mode(["crop", "hole", "outline", "protect"][i])
         )
-        for widget in (self.width_mm, self.min_feature_mm, self.colors, self.color_delta,
+        for widget in (self.width_mm, self.min_feature_mm, self.colors, self.color_delta, self.flat_min_area, self.distinct_delta,
                        self.shape, self.corner_mm, self.hole_toggle, self.hole_mm, self.hole_compensation_mm,
                        self.cleanup_toggle, self.resolution, self.outer_border_mm, self.hole_border_mm):
             signal = widget.valueChanged if isinstance(widget, (QDoubleSpinBox, QSpinBox)) else widget.currentIndexChanged
@@ -379,11 +401,17 @@ class MainWindow(QMainWindow):
         self.quantization_level.setEnabled(enabled)
         self.color_delta.setEnabled(enabled)
         self.protect_colors.setEnabled(enabled)
+        self.protect_flat.setEnabled(enabled)
+        self.flat_min_area.setEnabled(enabled and self.protect_flat.isChecked())
+        self.distinct_delta.setEnabled(enabled and self.protect_colors.isChecked())
 
     def _heightmap_options_changed(self, *_):
         enabled = self.heightmap_enabled.isChecked()
         self.heightmap_direction.setEnabled(enabled)
+        self.heightmap_strength.setEnabled(enabled)
         self.heightmap_export_button.setEnabled(enabled)
+        if hasattr(self, "preview_kind") and self.preview_kind.currentIndex() == 1:
+            self._refresh_output_canvas()
         if hasattr(self, "_history_current") and self.source is not None:
             self._record_history()
 
@@ -401,26 +429,81 @@ class MainWindow(QMainWindow):
 
     def _set_output_zoom(self, *_):
         factor = self.output_zoom.currentData()
-        for scroll, canvas in ((self.input_scroll, self.input_canvas), (self.output_scroll, self.output_canvas)):
-            if factor == 1:
+        pairs = ((self.input_scroll, self.input_canvas), (self.output_scroll, self.output_canvas))
+        if factor == 1 or self.input_canvas.image is None or self.output_canvas.image is None or self.prepared is None:
+            for scroll, canvas in pairs:
+                canvas.display_scale = None
                 canvas.setMinimumSize(280, 250)
-            else:
-                viewport = scroll.viewport().size()
-                canvas.setMinimumSize(max(280, viewport.width() * factor),
-                                      max(250, viewport.height() * factor))
+                canvas.update()
+        else:
+            source = self.input_canvas.image
+            viewport = self.input_scroll.viewport().size()
+            source_scale = min(max(1, viewport.width() - 24) / source.width(),
+                               max(1, viewport.height() - 24) / source.height()) * factor
+            # Both views show the same processed-photo pixels at the same scale.
+            result_scale = source_scale * source.width() / self.prepared.width * self.output.width / self.output_canvas.image.width()
+            for (scroll, canvas), scale in zip(pairs, (source_scale, result_scale)):
+                canvas.display_scale = scale
+                canvas.setMinimumSize(max(280, math.ceil(canvas.image.width() * scale + 24)),
+                                      max(250, math.ceil(canvas.image.height() * scale + 24)))
+                canvas.update()
+        QTimer.singleShot(0, self._align_preview_scroll)
 
-    @staticmethod
-    def _sync_scroll(source, target, value):
-        maximum = source.maximum()
-        with QSignalBlocker(target):
-            target.setValue(round(value / maximum * target.maximum()) if maximum else 0)
+    def _align_preview_scroll(self):
+        for axis in ("horizontalScrollBar", "verticalScrollBar"):
+            bar = getattr(self.input_scroll, axis)()
+            self._sync_scroll(axis, True, bar.value())
+
+    def _sync_scroll(self, axis, from_input, value):
+        source_scroll = self.input_scroll if from_input else self.output_scroll
+        target_scroll = self.output_scroll if from_input else self.input_scroll
+        source_canvas = self.input_canvas if from_input else self.output_canvas
+        target_canvas = self.output_canvas if from_input else self.input_canvas
+        source_bar = getattr(source_scroll, axis)()
+        target_bar = getattr(target_scroll, axis)()
+        if self.prepared is None or self.output is None or self.preview_pendant is None:
+            with QSignalBlocker(target_bar):
+                target_bar.setValue(round(value / source_bar.maximum() * target_bar.maximum()) if source_bar.maximum() else 0)
+            return
+        horizontal = axis == "horizontalScrollBar"
+        source_rect = source_canvas._image_rect()
+        target_rect = target_canvas._image_rect()
+        source_length = source_rect.width() if horizontal else source_rect.height()
+        target_length = target_rect.width() if horizontal else target_rect.height()
+        if source_length <= 0 or target_length <= 0:
+            return
+        viewport_length = source_scroll.viewport().width() if horizontal else source_scroll.viewport().height()
+        source_start = source_rect.x() if horizontal else source_rect.y()
+        fraction = (value + viewport_length / 2 - source_start) / source_length
+        pw, ph = self.prepared.size
+        x0, y0, x1, y1 = crop_pixel_box((pw, ph), self.preview_pendant.crop)
+        cw, ch = x1 - x0, y1 - y0
+        if self.preview_pendant.shape == "Circle":
+            side = min(cw, ch)
+            x0 += (cw - side) // 2
+            y0 += (ch - side) // 2
+            cw = ch = side
+        content_size = cw if horizontal else ch
+        full_size = pw if horizontal else ph
+        crop_start = x0 if horizontal else y0
+        result_size = self.output.width if horizontal else self.output.height
+        border = (result_size - content_size) / 2
+        if from_input:
+            target_fraction = (fraction * full_size - crop_start + border) / result_size
+        else:
+            target_fraction = (fraction * result_size - border + crop_start) / full_size
+        target_start = target_rect.x() if horizontal else target_rect.y()
+        target_viewport = target_scroll.viewport().width() if horizontal else target_scroll.viewport().height()
+        with QSignalBlocker(target_bar):
+            target_bar.setValue(round(target_start + target_fraction * target_length - target_viewport / 2))
 
     def _apply_gentle_preset(self):
-        widgets = (self.colors, self.color_delta, self.min_feature_mm, self.cleanup_toggle, self.protect_colors)
+        widgets = (self.colors, self.color_delta, self.min_feature_mm, self.cleanup_toggle, self.protect_colors, self.protect_flat)
         blockers = [QSignalBlocker(widget) for widget in widgets]
         self.colors.setValue(128)
         self.color_delta.setValue(1)
         self.protect_colors.setChecked(True)
+        self.protect_flat.setChecked(True)
         self.min_feature_mm.setValue(self.nozzle_mm.currentData())
         self.cleanup_toggle.setCurrentIndex(0)
         del blockers
@@ -616,7 +699,8 @@ class MainWindow(QMainWindow):
         effective_width = self.width_mm.value() * self.source.width / output_width
         cleanup = CleanupSettings(self.colors.value(), effective_width,
                                   max(self.min_feature_mm.value(), self.nozzle_mm.currentData()),
-                                  self.color_delta.value(), self.protect_colors.isChecked())
+                                  self.color_delta.value(), self.protect_colors.isChecked(),
+                                  self.protect_flat.isChecked(), self.flat_min_area.value(), self.distinct_delta.value())
         requested_hole = self.hole_toggle.currentIndex() == 0
         pendant = PendantSettings(
             crop=self.crop, shape={"圆角矩形": "Rounded rectangle", "矩形": "Rectangle",
@@ -710,6 +794,7 @@ class MainWindow(QMainWindow):
         self.preview_quantized = result.quantized_mask if result else None
         self.preview_merged = result.merged_mask if result else None
         self._refresh_output_canvas()
+        self._set_output_zoom()
         if result:
             total = result.visible_pixels or 1
             hole_note = " · 孔附近的轮廓或透明区域无法留出材料边距；当前不会裁孔" if self.hole_toggle.currentIndex() == 0 and not self.hole_safe else ""
@@ -794,6 +879,11 @@ class MainWindow(QMainWindow):
             self.output_canvas.set_image(None)
             return
         preview = self.output
+        if self.preview_kind.currentText() == "高度图":
+            preview = make_heightmap(self.output, self.heightmap_direction.currentIndex() == 1,
+                                     self.heightmap_strength.value() / 100.0)
+            self.output_canvas.set_image(preview)
+            return
         mask = (self.preview_changed, self.preview_quantized, self.preview_merged)[self.highlight_mode.currentIndex()]
         if self.highlight_toggle.isChecked() and mask is not None and self.prepared is not None and self.preview_pendant is not None:
             tint = Image.new("RGBA", self.prepared.size, (255, 74, 65, 0))
@@ -840,6 +930,9 @@ class MainWindow(QMainWindow):
             self.colors.setValue(data.get("colors", 32))
             self.color_delta.setValue(data.get("color_delta", 8))
             self.protect_colors.setChecked(data.get("protect_distinct_colors", True))
+            self.protect_flat.setChecked(data.get("preserve_flat_colors", data.get("protect_distinct_colors", True)))
+            self.flat_min_area.setValue(data.get("flat_min_area_px", 16))
+            self.distinct_delta.setValue(data.get("distinct_color_delta", 12))
             self.resolution.setCurrentIndex(max(0, self.resolution.findData(data.get("max_dimension", 2400))))
             self.cleanup_toggle.setCurrentIndex(0 if data.get("cleanup", True) else 1)
             self.shape.setCurrentText(data.get("shape", "圆角矩形"))
@@ -855,6 +948,7 @@ class MainWindow(QMainWindow):
             self.hole_border_color = data.get("hole_border_color", "#ffffff")
             self.heightmap_enabled.setChecked(data.get("heightmap_enabled", False))
             self.heightmap_direction.setCurrentIndex(1 if data.get("heightmap_dark_high", False) else 0)
+            self.heightmap_strength.setValue(data.get("heightmap_strength_percent", 100))
             self._heightmap_options_changed()
             self._update_border_buttons()
         finally:
@@ -934,7 +1028,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "无法导出", "高度图不能覆盖原照片或刚导出的彩色图片，请选择其他文件名。")
             return
         try:
-            heightmap = make_heightmap(self.output, self.heightmap_direction.currentIndex() == 1)
+            heightmap = make_heightmap(self.output, self.heightmap_direction.currentIndex() == 1,
+                                       self.heightmap_strength.value() / 100.0)
             filename = self.write_png(heightmap, filename)
             QMessageBox.information(self, "高度图已导出", f"已保存：\n{filename}\n\n"
                                     "在 Lumina 中先导入彩色 PNG 并完成普通预览，再启用浮雕、选择“根据高度图”并上传本文件。"
@@ -988,6 +1083,9 @@ class MainWindow(QMainWindow):
             "min_feature_mm": self.min_feature_mm.value(), "colors": self.colors.value(),
             "color_delta": self.color_delta.value(), "cleanup": self.cleanup_toggle.currentIndex() == 0,
             "protect_distinct_colors": self.protect_colors.isChecked(),
+            "preserve_flat_colors": self.protect_flat.isChecked(),
+            "flat_min_area_px": self.flat_min_area.value(),
+            "distinct_color_delta": self.distinct_delta.value(),
             "max_dimension": self.resolution.currentData(),
             "shape": self.shape.currentText(), "corner_radius_mm": self.corner_mm.value(),
             "polygon": self.polygon,
@@ -1001,6 +1099,7 @@ class MainWindow(QMainWindow):
             "hole_border_mm": self.hole_border_mm.value(), "hole_border_color": self.hole_border_color,
             "heightmap_enabled": self.heightmap_enabled.isChecked(),
             "heightmap_dark_high": self.heightmap_direction.currentIndex() == 1,
+            "heightmap_strength_percent": self.heightmap_strength.value(),
         }
 
     def save_project_dialog(self):

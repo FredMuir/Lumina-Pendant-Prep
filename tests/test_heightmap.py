@@ -31,6 +31,13 @@ class HeightmapTests(unittest.TestCase):
         self.assertEqual(color.getpixel((x, y))[3], 0)
         self.assertEqual(height.getpixel((x, y)), 0)
 
+    def test_strength_changes_exported_gray_without_changing_alpha_rule(self):
+        image = Image.new("RGBA", (2, 1))
+        image.putdata([(100, 100, 100, 255), (200, 200, 200, 0)])
+        self.assertEqual(list(make_heightmap(image, strength=0.5).tobytes()), [50, 0])
+        self.assertEqual(list(make_heightmap(image, strength=2).tobytes()), [200, 0])
+        self.assertEqual(list(make_heightmap(image, strength=0).tobytes()), [0, 0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -55,6 +55,31 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(window.quantization_level.currentData(), 64)
         window.close()
 
+    def test_independent_color_settings_and_legacy_project_restore(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        window = MainWindow()
+        self.assertTrue(window.open_image(str(photo)))
+        window.protect_flat.setChecked(False)
+        window.protect_colors.setChecked(True)
+        window.flat_min_area.setValue(32)
+        window.distinct_delta.setValue(7)
+        settings, _ = window._settings()
+        self.assertFalse(settings.preserve_flat_colors)
+        self.assertTrue(settings.protect_distinct_colors)
+        self.assertEqual(settings.flat_min_area_px, 32)
+        self.assertEqual(settings.distinct_color_delta, 7)
+        data = window._project_data()
+        window.protect_flat.setChecked(True)
+        window._apply_history(data)
+        self.assertFalse(window.protect_flat.isChecked())
+        self.assertTrue(window.protect_colors.isChecked())
+        old = {k: v for k, v in data.items() if k not in ("preserve_flat_colors", "flat_min_area_px", "distinct_color_delta")}
+        old["protect_distinct_colors"] = False
+        window._apply_history(old)
+        self.assertFalse(window.protect_colors.isChecked())
+        self.assertFalse(window.protect_flat.isChecked())
+        window.close()
+
     def test_processing_button_and_stage_progress_finish_and_reset(self):
         photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
         window = MainWindow()
@@ -98,6 +123,50 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual([generation for generation, _ in stages], [7] * 7)
         self.assertEqual([stage.split("：")[0] for _, stage in stages],
                          [f"步骤 {i}/7" for i in range(1, 8)])
+
+    def test_crop_and_border_scroll_to_same_source_location(self):
+        from lumina_pendant_prep.render import crop_pixel_box
+        photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
+        window = MainWindow(); window.resize(1400, 800); window.show()
+        self.assertTrue(window.open_image(str(photo)))
+        window.cleanup_toggle.setCurrentText("保留原色")
+        window._set_crop((.2, .1, .8, .9))
+        window.hole_toggle.setCurrentIndex(1)
+        window.outer_border_toggle.setChecked(True)
+        window.processing_toggle.click()
+        deadline = time.monotonic() + 20
+        while window.output_generation != window.generation and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.02)
+        self.assertEqual(window.output_generation, window.generation)
+        window.output_zoom.setCurrentIndex(window.output_zoom.findData(4))
+        self.app.processEvents()
+        self.assertAlmostEqual(window.input_canvas._image_rect().width() / window.prepared.width,
+                               window.output_canvas._image_rect().width() / window.output.width, delta=.002)
+        x0, y0, x1, y1 = crop_pixel_box(window.prepared.size, window.preview_pendant.crop)
+        for horizontal in (True, False):
+            axis = "horizontalScrollBar" if horizontal else "verticalScrollBar"
+            a = getattr(window.input_scroll, axis)(); b = getattr(window.output_scroll, axis)()
+            a.setValue(round(a.maximum() * .55)); self.app.processEvents()
+            def fraction(scroll, canvas, bar):
+                rect = canvas._image_rect()
+                start = rect.x() if horizontal else rect.y()
+                length = rect.width() if horizontal else rect.height()
+                viewport = scroll.viewport().width() if horizontal else scroll.viewport().height()
+                return (bar.value() + viewport / 2 - start) / length
+            original = fraction(window.input_scroll, window.input_canvas, a)
+            result = fraction(window.output_scroll, window.output_canvas, b)
+            full = window.prepared.width if horizontal else window.prepared.height
+            first, last = (x0, x1) if horizontal else (y0, y1)
+            output = window.output.width if horizontal else window.output.height
+            border = (output - (last - first)) / 2
+            mapped = (result * output - border + first) / full
+            self.assertAlmostEqual(original, mapped, delta=.005)
+            b.setValue(round(b.maximum() * .45)); self.app.processEvents()
+            original = fraction(window.input_scroll, window.input_canvas, a)
+            result = fraction(window.output_scroll, window.output_canvas, b)
+            mapped = (result * output - border + first) / full
+            self.assertAlmostEqual(original, mapped, delta=.005)
+        window.close()
 
     def test_changes_require_explicit_reprocessing_and_block_stale_exports(self):
         photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
@@ -143,6 +212,8 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertFalse(window.heightmap_export_button.isEnabled())
             window.heightmap_enabled.setChecked(True)
             window.heightmap_direction.setCurrentIndex(1)
+            window.heightmap_strength.setValue(50)
+            window.preview_kind.setCurrentText("高度图")
             self.assertEqual(window.output_generation, window.generation)
             target = root / "height.png"
             with patch("lumina_pendant_prep.app.QFileDialog.getSaveFileName", return_value=(str(target), "")), \
@@ -153,8 +224,11 @@ class GuiSmokeTests(unittest.TestCase):
                 self.assertEqual(result.size, window.output.size)
                 self.assertEqual(result.getpixel((0, 0)), 0)
                 self.assertNotIn("icc_profile", result.info)
+                x, y = result.width // 2, result.height // 2
+                self.assertEqual(window.output_canvas.image.pixelColor(x, y).red(), result.getpixel((x, y)))
             self.assertTrue(window._project_data()["heightmap_enabled"])
             self.assertTrue(window._project_data()["heightmap_dark_high"])
+            self.assertEqual(window._project_data()["heightmap_strength_percent"], 50)
             window.close()
 
     def test_multiframe_photo_discloses_selected_primary_or_first_page(self):

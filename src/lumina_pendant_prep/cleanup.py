@@ -25,6 +25,9 @@ class CleanupSettings:
     min_feature_mm: float = 0.45
     color_delta: float = 2.0
     protect_distinct_colors: bool = True
+    preserve_flat_colors: bool | None = None
+    flat_min_area_px: int = 16
+    distinct_color_delta: float = 12.0
 
 
 @dataclass(frozen=True)
@@ -72,7 +75,7 @@ def _flat_color_mask(rgb: np.ndarray, visible: np.ndarray, minimum_area: int,
     vertical = visible[:-1, :] & visible[1:, :] & (packed[:-1, :] == packed[1:, :])
     candidates, counts = np.unique(np.concatenate((packed[:, :-1][horizontal],
                                                     packed[:-1, :][vertical])), return_counts=True)
-    threshold = max(16, minimum_area)
+    threshold = max(1, minimum_area)
     eligible = np.flatnonzero(counts >= threshold - 1)
     eligible = eligible[np.argsort(-counts[eligible], kind="stable")[:64]]
     protected = np.zeros(visible.shape, dtype=bool)
@@ -162,6 +165,8 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
         raise ValueError("Color count must be between 2 and 256")
     if settings.target_width_mm <= 0 or settings.min_feature_mm < 0:
         raise ValueError("Print width must be positive and feature width non-negative")
+    if settings.flat_min_area_px < 1 or not 0 <= settings.distinct_color_delta <= 100:
+        raise ValueError("Invalid color protection settings")
     _check_cancel(cancelled)
     rgba = image.convert("RGBA")
     alpha = np.asarray(rgba.getchannel("A"), dtype=np.uint8)
@@ -172,8 +177,9 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
     minimum_area = minimum_feature_px * minimum_feature_px
     if progress:
         progress("检测纯色区域")
-    flat_mask, flat_colors = (_flat_color_mask(rgb_pixels, opaque, minimum_area, cancelled)
-                              if settings.protect_distinct_colors else (np.zeros(alpha.shape, dtype=bool), set()))
+    preserve_flat = settings.protect_distinct_colors if settings.preserve_flat_colors is None else settings.preserve_flat_colors
+    flat_mask, flat_colors = (_flat_color_mask(rgb_pixels, opaque, max(minimum_area, settings.flat_min_area_px), cancelled)
+                              if preserve_flat else (np.zeros(alpha.shape, dtype=bool), set()))
     _check_cancel(cancelled)
     if progress:
         progress("颜色量化")
@@ -250,7 +256,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
                 # A small but distinctly colored detail is often an eye, a
                 # flower, or a printed feature; do not silently recolor it.
                 if settings.protect_distinct_colors:
-                    candidates = [pair for pair in candidates if distances[color, pair[0]] <= 12.0]
+                    candidates = [pair for pair in candidates if distances[color, pair[0]] <= settings.distinct_color_delta]
                     if not candidates:
                         protected_islands += 1
                         continue

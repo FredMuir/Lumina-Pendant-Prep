@@ -85,14 +85,17 @@ def load_project(path: str | Path) -> dict[str, Any]:
                            ("min_feature_mm", 0, 5), ("color_delta", 0, 40),
                            ("corner_radius_mm", 0, 30), ("hole_diameter_mm", 0.5, 30),
                            ("hole_compensation_mm", 0, 5), ("outer_border_mm", .1, 5),
-                           ("hole_border_mm", .1, 5)):
+                           ("hole_border_mm", .1, 5), ("distinct_color_delta", 0, 100)):
         if key in data and not number(data[key], low, high):
             raise ValueError(f"Invalid {key}")
     if "colors" in data and (type(data["colors"]) is not int or not 2 <= data["colors"] <= 128):
         raise ValueError("Invalid colors")
+    for key, low, high in (("flat_min_area_px", 1, 1000000), ("heightmap_strength_percent", 0, 200)):
+        if key in data and (type(data[key]) is not int or not low <= data[key] <= high):
+            raise ValueError(f"Invalid {key}")
     if "max_dimension" in data and (type(data["max_dimension"]) is not int or data["max_dimension"] not in (0, 2400, 4096)):
         raise ValueError("Invalid output resolution")
-    for key in ("cleanup", "hole_enabled", "outer_border_enabled", "hole_border_enabled", "protect_distinct_colors", "heightmap_enabled", "heightmap_dark_high"):
+    for key in ("cleanup", "hole_enabled", "outer_border_enabled", "hole_border_enabled", "protect_distinct_colors", "preserve_flat_colors", "heightmap_enabled", "heightmap_dark_high"):
         if key in data and type(data[key]) is not bool:
             raise ValueError(f"Invalid {key}")
     for key in ("outer_border_color", "hole_border_color"):

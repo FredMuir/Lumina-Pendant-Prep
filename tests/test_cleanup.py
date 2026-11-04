@@ -156,6 +156,16 @@ class CleanupTests(unittest.TestCase):
         without_protection = simplify_image(source, CleanupSettings(8, 60, .4, 2, False))
         self.assertNotEqual(without_protection.image.getpixel((17, 17))[:3], (255, 0, 0))
 
+    def test_color_protection_options_are_independent(self):
+        pixels = np.full((40, 60, 4), (176, 150, 60, 255), dtype=np.uint8)
+        pixels[5:7, 5:7] = (255, 0, 0, 255)
+        source = Image.fromarray(pixels, "RGBA")
+        protect_small = simplify_image(source, CleanupSettings(8, 60, 4, 0, True, False))
+        merge_small = simplify_image(source, CleanupSettings(8, 60, 4, 0, False, True))
+        self.assertEqual(protect_small.image.getpixel((5, 5))[:3], (255, 0, 0))
+        self.assertNotEqual(merge_small.image.getpixel((5, 5))[:3], (255, 0, 0))
+        self.assertEqual(protect_small.protected_islands, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

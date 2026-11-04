@@ -30,6 +30,7 @@ class ImageCanvas(QWidget):
         self.interactive = interactive
         self.mode = "crop"
         self.image: QImage | None = None
+        self.display_scale: float | None = None
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.hole = (0.5, 0.12)
         self.hole_fraction = 0.07
@@ -64,7 +65,7 @@ class ImageCanvas(QWidget):
     def _image_rect(self) -> QRectF:
         if self.image is None or self.image.width() == 0:
             return QRectF()
-        scale = min((self.width() - 24) / self.image.width(), (self.height() - 24) / self.image.height())
+        scale = self.display_scale if self.display_scale is not None else min((self.width() - 24) / self.image.width(), (self.height() - 24) / self.image.height())
         w, h = self.image.width() * scale, self.image.height() * scale
         return QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
 
