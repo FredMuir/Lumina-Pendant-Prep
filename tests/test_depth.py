@@ -57,6 +57,39 @@ class DepthTests(unittest.TestCase):
                 # Photograph pixels matching the border color are not considered borders.
                 self.assertEqual(mask.getpixel((color.width // 2 - 20, color.height // 2)), 0)
 
+    def test_cleanup_removes_islands_but_keeps_large_regions_and_exclusions(self):
+        values = np.full((60, 80), 51, dtype=np.uint8)
+        values[10:35, 40:70] = 204
+        values[5:7, 5:7] = 204
+        values[20, 43] = 51
+        depth = Image.fromarray(values, "L")
+        color = Image.new("RGBA", depth.size, (255, 255, 255, 255))
+        color.info["dpi"] = (254, 254)
+        color.putpixel((6, 50), (0, 0, 0, 0))
+        border = Image.new("L", depth.size, 0)
+        border.putpixel((8, 50), 255)
+        clean = depth_heightmap(depth, color, False, 1, border, True, 6, .5)
+        self.assertEqual(clean.getpixel((5, 5)), 51)
+        self.assertEqual(clean.getpixel((43, 20)), 204)
+        self.assertEqual(clean.getpixel((50, 25)), 204)
+        self.assertEqual(clean.getpixel((6, 50)), 0)
+        self.assertEqual(clean.getpixel((8, 50)), 255)
+        unchanged = depth_heightmap(depth, color, False, 1, border, True, 6, 0)
+        self.assertEqual(unchanged.getpixel((5, 5)), 204)
+        self.assertEqual(unchanged.getpixel((43, 20)), 51)
+
+    def test_continuous_cleanup_removes_single_speck_without_touching_alpha(self):
+        values = np.full((40, 40), 120, dtype=np.uint8)
+        values[20, 20] = 255
+        depth = Image.fromarray(values, "L")
+        color = Image.new("RGBA", depth.size, (255, 255, 255, 255))
+        color.info["dpi"] = (254, 254)
+        color.putpixel((1, 1), (0, 0, 0, 0))
+        result = depth_heightmap(depth, color, False, 1, cleanup_mm=.4)
+        self.assertEqual(result.getpixel((20, 20)), 120)
+        self.assertEqual(result.getpixel((1, 1)), 0)
+        self.assertEqual(result.getpixel((20, 21)), 120)
+
     def test_terraces_have_discrete_levels_and_keep_hole_and_border(self):
         depth = Image.fromarray(np.tile(np.arange(256, dtype=np.uint8), (5, 1)), "L")
         color = Image.new("RGBA", depth.size, (255, 255, 255, 255))

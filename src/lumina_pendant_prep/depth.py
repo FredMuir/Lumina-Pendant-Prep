@@ -86,8 +86,38 @@ def align_depth(depth: np.ndarray, color: Image.Image, settings, border_mask=Non
     return result
 
 
+def clean_depth_islands(image: Image.Image, valid: np.ndarray, minimum_area: int) -> Image.Image:
+    """Merge small equal-height components into the closest adjacent height."""
+    if minimum_area <= 1:
+        return image
+    heights = np.asarray(image, dtype=np.uint8).copy()
+    height, width = heights.shape
+    for value in np.unique(heights[valid]):
+        selected = ((heights == value) & valid).astype(np.uint8)
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(selected, connectivity=8)
+        for component in range(1, count):
+            x, y, w, h, area = stats[component]
+            if area >= minimum_area:
+                continue
+            x0, y0, x1, y1 = max(0, x - 1), max(0, y - 1), min(width, x + w + 1), min(height, y + h + 1)
+            region = (labels[y0:y1, x0:x1] == component) & (heights[y0:y1, x0:x1] == value)
+            if not np.any(region):
+                continue
+            boundary = (cv2.dilate(region.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0) & ~region
+            boundary &= valid[y0:y1, x0:x1]
+            neighbors = heights[y0:y1, x0:x1][boundary]
+            neighbors = neighbors[neighbors != value]
+            if neighbors.size == 0:
+                continue
+            choices, counts = np.unique(neighbors, return_counts=True)
+            chosen = min(zip(choices.tolist(), counts.tolist()), key=lambda pair: (abs(pair[0] - int(value)), -pair[1], pair[0]))[0]
+            heights[y0:y1, x0:x1][region] = chosen
+    return Image.fromarray(heights, "L")
+
+
 def depth_heightmap(depth: Image.Image, color: Image.Image, far_high: bool, strength: float,
-                    border_mask=None, border_high=False, terrace_levels=None) -> Image.Image:
+                    border_mask=None, border_high=False, terrace_levels=None,
+                    cleanup_mm=0) -> Image.Image:
     if depth.size != color.size or not 0 <= strength <= 2:
         raise ValueError("高度图尺寸或强度无效。")
     image = depth.convert("L")
@@ -101,6 +131,28 @@ def depth_heightmap(depth: Image.Image, color: Image.Image, far_high: bool, stre
         # Map intensity to evenly spaced plateaus, including exact black/white.
         levels = terrace_levels - 1
         image = image.point(lambda value: round(round(value * levels / 255) * 255 / levels))
+    if not 0 <= cleanup_mm <= 2:
+        raise ValueError("高度图净化尺寸无效。")
+    if cleanup_mm:
+        alpha = np.asarray(color.convert("RGBA").getchannel("A"), dtype=np.uint8)
+        valid = alpha == 255
+        if border_mask is not None:
+            if border_mask.size != color.size:
+                raise ValueError("边框蒙版尺寸不一致。")
+            valid &= np.asarray(border_mask, dtype=np.uint8) == 0
+        dpi = color.info.get("dpi", (300, 300))[0]
+        feature_px = max(1, round(cleanup_mm * dpi / 25.4))
+        if terrace_levels is not None:
+            image = clean_depth_islands(image, valid, feature_px * feature_px)
+        elif feature_px > 1:
+            # Median filtering removes isolated specks without blending slopes
+            # across excluded boundaries, transparent holes or border pixels.
+            kernel = min(7, feature_px if feature_px % 2 else feature_px + 1)
+            valid_interior = cv2.erode(valid.astype(np.uint8), np.ones((kernel, kernel), np.uint8)) > 0
+            values = np.asarray(image, dtype=np.uint8).copy()
+            filtered = cv2.medianBlur(values, kernel)
+            values[valid_interior] = filtered[valid_interior]
+            image = Image.fromarray(values, "L")
     result = ImageChops.multiply(image, color.convert("RGBA").getchannel("A"))
     if border_mask is not None:
         if border_mask.size != color.size:
