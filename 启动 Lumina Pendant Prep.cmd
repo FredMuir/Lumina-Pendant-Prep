@@ -1,6 +1,8 @@
 @echo off
 setlocal
 set "root=%LOCALAPPDATA%\LuminaPendantPrep"
+rem Codex Desktop can redirect LOCALAPPDATA writes into its package cache.
+if not exist "%root%\current.txt" set "root=%LOCALAPPDATA%\Packages\OpenAI.Codex_2p2nqsd0c76g0\LocalCache\Local\LuminaPendantPrep"
 if not exist "%root%\current.txt" (
   echo No installed version was found. Run scripts\build_windows.ps1 first.
   pause
