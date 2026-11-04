@@ -14,7 +14,7 @@ from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox, QCheckBox,
-    QColorDialog, QScrollArea, QSplitter, QVBoxLayout, QWidget,
+    QColorDialog, QProgressBar, QScrollArea, QSplitter, QVBoxLayout, QWidget,
 )
 
 from .canvas import ImageCanvas
@@ -30,6 +30,7 @@ class PreviewSignals(QObject):
     finished = Signal(int, object, object, object)
     failed = Signal(int, str)
     cancelled = Signal(int)
+    progress = Signal(int, str)
 
 
 class PreviewJob(QRunnable):
@@ -56,6 +57,7 @@ class PreviewJob(QRunnable):
     def run(self):
         try:
             self._check_cancel()
+            self.signals.progress.emit(self.generation, "步骤 1/7：准备图片" if self.enabled else "步骤 1/2：准备图片")
             if self.max_dimension and max(self.image.size) > self.max_dimension:
                 image = self.image.copy()
                 image.thumbnail((self.max_dimension, self.max_dimension), Image.Resampling.LANCZOS)
@@ -83,7 +85,11 @@ class PreviewJob(QRunnable):
                 analysis_image = self.image.convert("RGBA")
                 original_alpha = analysis_image.getchannel("A")
                 analysis_image.putalpha(selection)
-                result = simplify_image(analysis_image, self.cleanup, self.cancel_requested.is_set)
+                steps = {"检测纯色区域": 2, "颜色量化": 3, "合并相近色块": 4,
+                         "检查并合并小色块": 5, "生成处理结果": 6}
+                result = simplify_image(analysis_image, self.cleanup, self.cancel_requested.is_set,
+                                        lambda stage: self.signals.progress.emit(
+                                            self.generation, f"步骤 {steps[stage]}/7：{stage}"))
                 prepared = result.image
                 prepared.paste(self.image.convert("RGBA"), mask=protection)
                 prepared.putalpha(original_alpha)
@@ -91,6 +97,8 @@ class PreviewJob(QRunnable):
                 result = None
                 prepared = self.image
             self._check_cancel()
+            self.signals.progress.emit(self.generation, "步骤 7/7：生成挂坠预览" if self.enabled
+                                       else "步骤 2/2：生成挂坠预览")
             output = make_pendant(prepared, self.pendant)
             self._check_cancel()
             self.signals.finished.emit(self.generation, prepared, output, result)
@@ -132,6 +140,11 @@ class MainWindow(QMainWindow):
         self.timer.setSingleShot(True)
         self.timer.setInterval(180)
         self.timer.timeout.connect(self._start_preview)
+        self.progress_timer = QTimer(self)
+        self.progress_timer.setInterval(250)
+        self.progress_timer.timeout.connect(self._update_progress_label)
+        self.progress_started = None
+        self.progress_stage = ""
         self._build_ui()
         self._build_menu()
         self._update_enabled()
@@ -150,13 +163,21 @@ class MainWindow(QMainWindow):
         open_button.clicked.connect(self.open_dialog)
         export_button = QPushButton("导出 PNG")
         export_button.clicked.connect(self.export_png)
-        toolbar.addWidget(open_button)
-        toolbar.addWidget(export_button)
-        control_layout.addLayout(toolbar)
-        self.processing_toggle = QCheckBox("开始处理并生成预览")
-        self.processing_toggle.setToolTip("打开照片后先调整参数；勾选后才开始净化和生成导出预览。")
+        self.processing_toggle = QPushButton("开始处理")
+        self.processing_toggle.setCheckable(True)
+        self.processing_toggle.setToolTip("打开照片后先调整参数；点击开始处理，再次点击可停止。")
         self.processing_toggle.toggled.connect(self._processing_changed)
-        control_layout.addWidget(self.processing_toggle)
+        toolbar.addWidget(open_button, 1)
+        toolbar.addWidget(export_button, 1)
+        toolbar.addWidget(self.processing_toggle, 1)
+        control_layout.addLayout(toolbar)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(False)
+        self.progress_label = QLabel("等待开始处理")
+        control_layout.addWidget(self.progress_bar)
+        control_layout.addWidget(self.progress_label)
 
         print_group = QGroupBox("打印与色块净化")
         form = QFormLayout(print_group)
@@ -167,6 +188,14 @@ class MainWindow(QMainWindow):
         self.nozzle_mm.setCurrentIndex(1)
         self.min_feature_mm = self._double(0.45, 0, 5, 0.05)
         self.colors = QSpinBox(); self.colors.setRange(2, 128); self.colors.setValue(96)
+        self.quantization_level = QComboBox()
+        for name, amount in (("细致 · 128 色", 128), ("较细 · 96 色（推荐）", 96),
+                             ("均衡 · 64 色", 64), ("较强 · 32 色", 32), ("最强 · 16 色", 16),
+                             ("自定义", None)):
+            self.quantization_level.addItem(name, amount)
+        self.quantization_level.setCurrentIndex(self.quantization_level.findData(96))
+        self.quantization_level.currentIndexChanged.connect(self._quantization_level_changed)
+        self.colors.valueChanged.connect(self._sync_quantization_level)
         self.color_delta = self._double(2, 0, 40, 1)
         self.protect_colors = QCheckBox("保留纯色区域和明显不同的小色块")
         self.protect_colors.setChecked(True)
@@ -181,6 +210,7 @@ class MainWindow(QMainWindow):
         form.addRow("目标宽度 (mm)", self.width_mm)
         form.addRow("喷嘴直径 (mm)", self.nozzle_mm)
         form.addRow("最小特征宽度 (mm)", self.min_feature_mm)
+        form.addRow("颜色量化级别", self.quantization_level)
         form.addRow("颜色上限（不含保护色）", self.colors)
         form.addRow("相近色阈值", self.color_delta)
         form.addRow(self.protect_colors)
@@ -324,8 +354,21 @@ class MainWindow(QMainWindow):
     def _update_cleanup_controls(self, *_):
         enabled = self.cleanup_toggle.currentIndex() == 0
         self.colors.setEnabled(enabled)
+        self.quantization_level.setEnabled(enabled)
         self.color_delta.setEnabled(enabled)
         self.protect_colors.setEnabled(enabled)
+
+    def _quantization_level_changed(self, *_):
+        amount = self.quantization_level.currentData()
+        if amount is not None:
+            self.colors.setValue(amount)
+
+    def _sync_quantization_level(self, value):
+        index = self.quantization_level.findData(value)
+        if index < 0:
+            index = self.quantization_level.findData(None)
+        with QSignalBlocker(self.quantization_level):
+            self.quantization_level.setCurrentIndex(index)
 
     def _set_output_zoom(self, *_):
         factor = self.output_zoom.currentData()
@@ -352,6 +395,7 @@ class MainWindow(QMainWindow):
         self.min_feature_mm.setValue(self.nozzle_mm.currentData())
         self.cleanup_toggle.setCurrentIndex(0)
         del blockers
+        self._sync_quantization_level(self.colors.value())
         self._update_cleanup_controls()
         self._schedule_preview()
 
@@ -402,6 +446,8 @@ class MainWindow(QMainWindow):
         self.timer.stop()
         with QSignalBlocker(self.processing_toggle):
             self.processing_toggle.setChecked(False)
+        self.processing_toggle.setText("开始处理")
+        self._finish_progress("等待开始处理")
         self.generation += 1
         self.output_generation = -1
         self.prepared = self.output = self.preview_changed = None
@@ -419,7 +465,7 @@ class MainWindow(QMainWindow):
         self._update_status()
         self._update_enabled()
         self._sync_geometry()
-        self.status.setText("照片已打开。调整参数后勾选“开始处理并生成预览”。")
+        self.status.setText("照片已打开。调整参数后点击“开始处理”。")
         return True
 
     def _processing_changed(self, checked):
@@ -428,14 +474,36 @@ class MainWindow(QMainWindow):
                 with QSignalBlocker(self.processing_toggle):
                     self.processing_toggle.setChecked(False)
                 return
+            self.processing_toggle.setText("停止处理")
             self._schedule_preview()
         else:
+            self.processing_toggle.setText("开始处理")
             self.timer.stop()
             self.generation += 1
             if self.active_job is not None:
                 self.active_job.cancel()
             self.output_generation = -1
-            self.status.setText("处理已停止；勾选开始后重新生成预览。")
+            self._finish_progress("处理已停止")
+            self.status.setText("处理已停止；点击开始后重新生成预览。")
+
+    def _update_progress_label(self):
+        if self.progress_started is not None:
+            elapsed = max(0, int(time.monotonic() - self.progress_started))
+            self.progress_label.setText(f"{self.progress_stage} · 已用时 {elapsed} 秒")
+
+    def _preview_progress(self, generation, stage):
+        if generation == self.generation and self.processing_toggle.isChecked():
+            self.progress_stage = stage
+            self._update_progress_label()
+
+    def _finish_progress(self, text, completed=False):
+        elapsed = None if self.progress_started is None else max(0, int(time.monotonic() - self.progress_started))
+        self.progress_timer.stop()
+        self.progress_started = None
+        self.progress_stage = ""
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(1 if completed else 0)
+        self.progress_label.setText(f"{text} · 用时 {elapsed} 秒" if completed and elapsed is not None else text)
 
     def _set_crop(self, crop):
         self.crop = tuple(crop)
@@ -547,6 +615,11 @@ class MainWindow(QMainWindow):
             if self.active_job is not None:
                 self.active_job.cancel()
             if self.processing_toggle.isChecked():
+                if self.active_job is not None:
+                    self.progress_stage = "正在停止旧任务，准备重新处理"
+                    self._update_progress_label()
+                else:
+                    self.progress_label.setText("等待处理")
                 self.timer.start()
 
     def _start_preview(self):
@@ -559,6 +632,7 @@ class MainWindow(QMainWindow):
             self.preview_quantized = self.preview_merged = None
             self.output_canvas.set_image(None)
             self.status.setText("请用多边形工具至少绘制三个节点，并右键完成轮廓。")
+            self._finish_progress("等待完成多边形")
             return
         cleanup, pendant = self._settings()
         job = PreviewJob(self.generation, self.source, cleanup, pendant,
@@ -568,7 +642,13 @@ class MainWindow(QMainWindow):
         job.signals.finished.connect(self._preview_ready)
         job.signals.failed.connect(self._preview_failed)
         job.signals.cancelled.connect(self._preview_cancelled)
+        job.signals.progress.connect(self._preview_progress)
         self.preview_running = True
+        self.progress_started = time.monotonic()
+        self.progress_stage = "准备处理"
+        self.progress_bar.setRange(0, 0)
+        self._update_progress_label()
+        self.progress_timer.start()
         self.pool.start(job)
         self.status.setText("正在生成预览…")
 
@@ -578,6 +658,7 @@ class MainWindow(QMainWindow):
         if generation != self.generation:
             self.timer.start(0)
             return
+        self._finish_progress("处理完成", completed=True)
         self.prepared, self.output = prepared, output
         self.output_generation = generation
         self.preview_changed = result.changed_mask if result else None
@@ -607,6 +688,7 @@ class MainWindow(QMainWindow):
         if generation != self.generation:
             self.timer.start(0)
         else:
+            self._finish_progress("处理失败")
             self.status.setText(f"预览失败：{message}")
 
     def _preview_cancelled(self, generation):
@@ -617,6 +699,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.timer.stop()
+        self.progress_timer.stop()
         if self.active_job is not None:
             self.active_job.cancel()
         super().closeEvent(event)

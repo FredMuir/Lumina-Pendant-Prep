@@ -40,6 +40,63 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(window.output_generation, window.generation)
         window.close()
 
+    def test_quantization_level_and_custom_color_count_stay_in_sync(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        window = MainWindow()
+        self.assertTrue(window.open_image(str(photo)))
+        self.assertEqual(window.quantization_level.currentData(), 96)
+        window.quantization_level.setCurrentIndex(window.quantization_level.findData(32))
+        self.assertEqual(window.colors.value(), 32)
+        self.assertEqual(window._project_data()["colors"], 32)
+        window.colors.setValue(73)
+        self.assertIsNone(window.quantization_level.currentData())
+        self.assertEqual(window._project_data()["colors"], 73)
+        window._apply_history({**window._project_data(), "colors": 64})
+        self.assertEqual(window.quantization_level.currentData(), 64)
+        window.close()
+
+    def test_processing_button_and_stage_progress_finish_and_reset(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        window = MainWindow()
+        self.assertTrue(window.open_image(str(photo)))
+        self.assertEqual(window.processing_toggle.text(), "开始处理")
+        window.processing_toggle.click()
+        self.assertEqual(window.processing_toggle.text(), "停止处理")
+        window.timer.stop()
+        window._start_preview()
+        self.assertEqual((window.progress_bar.minimum(), window.progress_bar.maximum()), (0, 0))
+        window._preview_progress(window.generation, "颜色量化")
+        self.assertIn("颜色量化", window.progress_label.text())
+        self.assertIn("已用时", window.progress_label.text())
+        window._preview_progress(window.generation - 1, "过时进度")
+        self.assertNotIn("过时进度", window.progress_label.text())
+        deadline = time.monotonic() + 30
+        while window.output_generation != window.generation and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(.02)
+        self.assertEqual(window.output_generation, window.generation)
+        self.assertIn("处理完成", window.progress_label.text())
+        self.assertEqual(window.progress_bar.value(), 1)
+        window.processing_toggle.click()
+        self.assertEqual(window.processing_toggle.text(), "开始处理")
+        self.assertEqual(window.progress_label.text(), "处理已停止")
+        self.assertEqual(window.progress_bar.value(), 0)
+        window.close()
+
+    def test_worker_reports_real_stages_for_real_photo(self):
+        photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
+        with Image.open(photo) as opened:
+            image = opened.convert("RGBA")
+            image.thumbnail((160, 160))
+        pendant = PendantSettings(crop=(0, 0, 1, 1), shape="Rectangle", hole_enabled=False)
+        job = PreviewJob(7, image, CleanupSettings(), pendant, True)
+        stages = []
+        job.signals.progress.connect(lambda generation, stage: stages.append((generation, stage)))
+        job.run()
+        self.assertEqual([generation for generation, _ in stages], [7] * 7)
+        self.assertEqual([stage.split("：")[0] for _, stage in stages],
+                         [f"步骤 {i}/7" for i in range(1, 8)])
+
     def test_multiframe_photo_discloses_selected_primary_or_first_page(self):
         fixtures = Path(__file__).parent / "fixtures"
         with Image.open(fixtures / "cat-photo.jpg") as cat, Image.open(fixtures / "flower-photo.jpg") as flower:

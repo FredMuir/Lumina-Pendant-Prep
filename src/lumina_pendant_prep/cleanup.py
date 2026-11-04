@@ -155,7 +155,8 @@ def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
 
 
 def simplify_image(image: Image.Image, settings: CleanupSettings,
-                   cancelled: Callable[[], bool] | None = None) -> CleanupResult:
+                   cancelled: Callable[[], bool] | None = None,
+                   progress: Callable[[str], None] | None = None) -> CleanupResult:
     """Quantize without dithering, merge adjacent similar colors, then absorb tiny islands."""
     if not 2 <= settings.colors <= 256:
         raise ValueError("Color count must be between 2 and 256")
@@ -169,8 +170,13 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
     width, height = image.size
     minimum_feature_px = max(1, math.ceil(width / settings.target_width_mm * settings.min_feature_mm))
     minimum_area = minimum_feature_px * minimum_feature_px
+    if progress:
+        progress("检测纯色区域")
     flat_mask, flat_colors = (_flat_color_mask(rgb_pixels, opaque, minimum_area, cancelled)
                               if settings.protect_distinct_colors else (np.zeros(alpha.shape, dtype=bool), set()))
+    _check_cancel(cancelled)
+    if progress:
+        progress("颜色量化")
     if np.any(opaque) and np.any(~opaque):
         # Transparent pixels must not consume palette entries or influence the
         # frequency of visible colors. Train on visible pixels only.
@@ -193,11 +199,15 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
     distances = _lab_distances(labs)
     initial_labels = labels.copy()
 
+    if progress:
+        progress("合并相近色块")
     _merge_adjacent_regions(labels, opaque, labs, settings.color_delta, distances, cancelled)
 
     merged_islands = 0
     protected_islands = 0
     narrow_features = 0
+    if progress:
+        progress("检查并合并小色块")
     if minimum_area > 1:
         # Update labels after each merge so adjacent tiny components cannot
         # exchange colors simultaneously and remain fragmented.
@@ -255,6 +265,8 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
                 labels[y0:y1, x0:x1][component] = chosen
                 merged_islands += 1
 
+    if progress:
+        progress("生成处理结果")
     output_rgb = np.zeros((height, width, 3), dtype=np.uint8)
     for color in np.unique(labels[opaque]):
         _check_cancel(cancelled)
