@@ -14,3 +14,4 @@ Thumbs.db
 *.lpproj
 *.png
 !assets/*.png
+!src/lumina_pendant_prep/assets/*.png

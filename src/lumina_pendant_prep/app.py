@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw
 from PySide6.QtCore import QObject, QRunnable, QSignalBlocker, QThreadPool, QTimer, Qt, Signal
-from PySide6.QtGui import QAction, QColor
+from PySide6.QtGui import QAction, QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox, QCheckBox,
@@ -114,6 +114,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"Lumina Pendant Prep {__version__}")
+        self.setWindowIcon(QIcon(str(Path(__file__).parent / "assets" / "app.png")))
         self.resize(1320, 820)
         self.setAcceptDrops(True)
         self.source: Image.Image | None = None

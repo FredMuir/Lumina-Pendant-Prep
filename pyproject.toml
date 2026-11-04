@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lumina-pendant-prep"
-version = "0.2.5"
+version = "0.2.6"
 description = "Cross-platform image preparation for layered FDM photo prints and pendants"
 requires-python = ">=3.10"
 dependencies = [
@@ -20,4 +20,7 @@ lumina-pendant-prep = "lumina_pendant_prep.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+lumina_pendant_prep = ["assets/*.png", "assets/*.ico"]
 

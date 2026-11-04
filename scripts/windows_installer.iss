@@ -24,6 +24,7 @@ OutputBaseFilename=LuminaPendantPrep-{#AppVersion}-Windows-x64-Setup
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\src\lumina_pendant_prep\assets\app.ico
 UninstallDisplayIcon={app}\LuminaPendantPrep.exe
 
 [Tasks]

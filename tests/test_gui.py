@@ -23,6 +23,15 @@ class GuiSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_window_and_windows_icon_assets_are_available(self):
+        from lumina_pendant_prep import app as app_module
+        assets = Path(app_module.__file__).parent / "assets"
+        window = MainWindow()
+        self.assertFalse(window.windowIcon().isNull())
+        with Image.open(assets / "app.ico") as icon:
+            self.assertTrue({(16, 16), (32, 32), (48, 48), (256, 256)} <= icon.ico.sizes())
+        window.close()
+
     def test_open_does_not_start_processing_until_enabled(self):
         photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
         window = MainWindow()

@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [('src/lumina_pendant_prep/assets', 'lumina_pendant_prep/assets')]
 binaries = []
 hiddenimports = []
 # PyInstaller's Qt hooks collect the modules actually imported by the app.
@@ -38,6 +38,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='LuminaPendantPrep',
+    icon='src/lumina_pendant_prep/assets/app.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
