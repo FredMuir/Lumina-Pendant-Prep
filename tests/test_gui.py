@@ -30,6 +30,7 @@ class GuiSmokeTests(unittest.TestCase):
             window = MainWindow()
             window.width_mm.setValue(75)
             window.smooth_edges.setChecked(False)
+            window.smooth_strength.setValue(35)
             window.hole_x_percent.setValue(40)
             with patch("lumina_pendant_prep.app.QInputDialog.getText", return_value=("我的预设", True)):
                 window.save_new_preset()
@@ -43,6 +44,7 @@ class GuiSmokeTests(unittest.TestCase):
             window.preset_select.setCurrentIndex(window.preset_select.findText("已重命名"))
             self.assertEqual(window.width_mm.value(), 80)
             self.assertFalse(window.smooth_edges.isChecked())
+            self.assertEqual(window.smooth_strength.value(), 35)
             self.assertAlmostEqual(window.hole[0], .4)
             self.assertTrue(window.open_image(str(photo)))
             self.assertAlmostEqual(window.hole[0], .4)

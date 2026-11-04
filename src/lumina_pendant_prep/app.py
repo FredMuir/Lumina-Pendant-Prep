@@ -279,6 +279,8 @@ class MainWindow(QMainWindow):
         self.smooth_edges = QCheckBox("平滑色块边缘（减少锯齿）")
         self.smooth_edges.setChecked(True)
         self.smooth_edges.setToolTip("仅平滑相邻色块交界处约一像素；会增加少量过渡颜色，细节仍需检查切片。")
+        self.smooth_strength = QSpinBox(); self.smooth_strength.setRange(0, 100); self.smooth_strength.setValue(100); self.smooth_strength.setSuffix("%")
+        self.smooth_strength.setToolTip("0% 不平滑，100% 为完整轻度平滑；修改后需点击开始处理。")
         self.protect_colors = QCheckBox("保留明显不同的小色块")
         self.protect_colors.setChecked(True)
         self.protect_colors.setToolTip("避免小色块被强行替换成色差过大的邻色；保留的细节仍可能无法打印。")
@@ -300,6 +302,7 @@ class MainWindow(QMainWindow):
         form.addRow(self.protect_flat)
         form.addRow("纯色最小面积 (像素)", self.flat_min_area)
         form.addRow(self.smooth_edges)
+        form.addRow("边缘平滑强度", self.smooth_strength)
         form.addRow(self.protect_colors)
         form.addRow("小色块最大合并色差", self.distinct_delta)
         form.addRow("处理模式", self.cleanup_toggle)
@@ -471,6 +474,7 @@ class MainWindow(QMainWindow):
         self.outer_border_toggle.toggled.connect(self._schedule_preview)
         self.hole_border_toggle.toggled.connect(self._schedule_preview)
         self.smooth_edges.toggled.connect(self._schedule_preview)
+        self.smooth_edges.toggled.connect(self._update_cleanup_controls)
         self.protect_colors.toggled.connect(self._schedule_preview)
         self.protect_flat.toggled.connect(self._schedule_preview)
         self.protect_colors.toggled.connect(self._update_cleanup_controls)
@@ -479,7 +483,7 @@ class MainWindow(QMainWindow):
             lambda i: self.input_canvas.set_mode(["crop", "hole", "outline", "protect"][i])
         )
         for widget in (self.width_mm, self.min_feature_mm, self.colors, self.color_delta, self.flat_min_area, self.distinct_delta,
-                       self.shape, self.corner_mm, self.hole_toggle, self.hole_mm, self.hole_compensation_mm,
+                       self.shape, self.corner_mm, self.hole_toggle, self.hole_mm, self.hole_compensation_mm, self.smooth_strength,
                        self.cleanup_toggle, self.resolution, self.outer_border_mm, self.hole_border_mm):
             signal = widget.valueChanged if isinstance(widget, (QDoubleSpinBox, QSpinBox)) else widget.currentIndexChanged
             signal.connect(self._schedule_preview)
@@ -493,6 +497,7 @@ class MainWindow(QMainWindow):
         self.quantization_level.setEnabled(enabled)
         self.color_delta.setEnabled(enabled)
         self.smooth_edges.setEnabled(enabled)
+        self.smooth_strength.setEnabled(enabled and self.smooth_edges.isChecked())
         self.protect_colors.setEnabled(enabled)
         self.protect_flat.setEnabled(enabled)
         self.flat_min_area.setEnabled(enabled and self.protect_flat.isChecked())
@@ -925,7 +930,7 @@ class MainWindow(QMainWindow):
                                   max(self.min_feature_mm.value(), self.nozzle_mm.currentData()),
                                   self.color_delta.value(), self.protect_colors.isChecked(),
                                   self.protect_flat.isChecked(), self.flat_min_area.value(), self.distinct_delta.value(),
-                                  self.smooth_edges.isChecked())
+                                  self.smooth_edges.isChecked(), self.smooth_strength.value())
         requested_hole = self.hole_toggle.currentIndex() == 0
         pendant = PendantSettings(
             crop=self.crop, shape={"圆角矩形": "Rounded rectangle", "矩形": "Rectangle",
@@ -1174,6 +1179,7 @@ class MainWindow(QMainWindow):
             self.colors.setValue(data.get("colors", 32))
             self.color_delta.setValue(data.get("color_delta", 8))
             self.smooth_edges.setChecked(data.get("smooth_edges", True))
+            self.smooth_strength.setValue(data.get("edge_smoothing_strength", 100))
             self.protect_colors.setChecked(data.get("protect_distinct_colors", True))
             self.protect_flat.setChecked(data.get("preserve_flat_colors", data.get("protect_distinct_colors", True)))
             self.flat_min_area.setValue(data.get("flat_min_area_px", 16))
@@ -1411,6 +1417,7 @@ class MainWindow(QMainWindow):
             "min_feature_mm": self.min_feature_mm.value(), "colors": self.colors.value(),
             "color_delta": self.color_delta.value(), "cleanup": self.cleanup_toggle.currentIndex() == 0,
             "smooth_edges": self.smooth_edges.isChecked(),
+            "edge_smoothing_strength": self.smooth_strength.value(),
             "protect_distinct_colors": self.protect_colors.isChecked(),
             "preserve_flat_colors": self.protect_flat.isChecked(),
             "flat_min_area_px": self.flat_min_area.value(),

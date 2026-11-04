@@ -29,6 +29,7 @@ class CleanupSettings:
     flat_min_area_px: int = 16
     distinct_color_delta: float = 12.0
     smooth_edges: bool = False
+    edge_smoothing_strength: int = 100
 
 
 @dataclass(frozen=True)
@@ -166,7 +167,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
         raise ValueError("Color count must be between 2 and 256")
     if settings.target_width_mm <= 0 or settings.min_feature_mm < 0:
         raise ValueError("Print width must be positive and feature width non-negative")
-    if settings.flat_min_area_px < 1 or not 0 <= settings.distinct_color_delta <= 100:
+    if settings.flat_min_area_px < 1 or not 0 <= settings.distinct_color_delta <= 100 or not 0 <= settings.edge_smoothing_strength <= 100:
         raise ValueError("Invalid color protection settings")
     _check_cancel(cancelled)
     rgba = image.convert("RGBA")
@@ -280,7 +281,7 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
         color = int(color)
         output_rgb[(labels == color) & opaque] = palette[color * 3:color * 3 + 3]
     output_rgb[flat_mask] = rgb_pixels[flat_mask]
-    if settings.smooth_edges:
+    if settings.smooth_edges and settings.edge_smoothing_strength > 0:
         # Blend only the one-pixel boundary between different output colors.
         # Normalize by visibility so transparent pixels cannot introduce dark halos.
         edge = np.zeros((height, width), dtype=bool)
@@ -301,7 +302,12 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
             blurred = cv2.GaussianBlur(output_rgb[start:end].astype(np.float32) * visibility[..., None], (3, 3), 0)
             smooth = np.rint(blurred / np.maximum(weight[..., None], 1e-6)).clip(0, 255).astype(np.uint8)
             selected = edge[top:bottom]
-            smoothed[top:bottom][selected] = smooth[top - start:bottom - start][selected]
+            filtered = smooth[top - start:bottom - start][selected]
+            if settings.edge_smoothing_strength < 100:
+                original = output_rgb[top:bottom][selected].astype(np.uint16)
+                amount = settings.edge_smoothing_strength
+                filtered = ((original * (100 - amount) + filtered.astype(np.uint16) * amount + 50) // 100).astype(np.uint8)
+            smoothed[top:bottom][selected] = filtered
         output_rgb = smoothed
     output = Image.fromarray(np.dstack((output_rgb, alpha)), "RGBA")
     palette_rgb = np.asarray(palette, dtype=np.uint8).reshape(-1, 3)

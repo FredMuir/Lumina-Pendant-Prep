@@ -17,6 +17,11 @@ class CleanupTests(unittest.TestCase):
         settings = CleanupSettings(colors=4, min_feature_mm=0, color_delta=0)
         sharp = simplify_image(image, settings).image
         smooth = simplify_image(image, replace(settings, smooth_edges=True)).image
+        half = simplify_image(image, replace(settings, smooth_edges=True, edge_smoothing_strength=50)).image
+        zero = simplify_image(image, replace(settings, smooth_edges=True, edge_smoothing_strength=0)).image
+        self.assertEqual(sharp.tobytes(), zero.tobytes())
+        self.assertLess(np.abs(np.asarray(half, dtype=np.int16) - np.asarray(sharp, dtype=np.int16)).sum(),
+                        np.abs(np.asarray(smooth, dtype=np.int16) - np.asarray(sharp, dtype=np.int16)).sum())
         self.assertEqual(sharp.getpixel((50, 40)), smooth.getpixel((50, 40)))
         self.assertEqual(sharp.getpixel((110, 90)), smooth.getpixel((110, 90)))
         self.assertEqual(smooth.getpixel((0, 0))[3], 0)

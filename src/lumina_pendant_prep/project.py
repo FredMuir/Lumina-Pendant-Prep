@@ -94,7 +94,7 @@ def validate_project_data(data: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"Invalid {key}")
     if "colors" in data and (type(data["colors"]) is not int or not 2 <= data["colors"] <= 128):
         raise ValueError("Invalid colors")
-    for key, low, high in (("flat_min_area_px", 1, 1000000), ("heightmap_strength_percent", 0, 200)):
+    for key, low, high in (("flat_min_area_px", 1, 1000000), ("heightmap_strength_percent", 0, 200), ("edge_smoothing_strength", 0, 100)):
         if key in data and (type(data[key]) is not int or not low <= data[key] <= high):
             raise ValueError(f"Invalid {key}")
     if "max_dimension" in data and (type(data["max_dimension"]) is not int or data["max_dimension"] not in (0, 2400, 4096)):
