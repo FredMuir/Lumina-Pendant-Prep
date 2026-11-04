@@ -40,6 +40,7 @@ class CleanupResult:
     resulting_colors: int
     merged_islands: int
     protected_islands: int
+    preserved_flat_colors: int
     minimum_feature_px: int
     narrow_features: int
 
@@ -57,6 +58,36 @@ def _lab_distances(labs: dict[int, np.ndarray]) -> np.ndarray:
     for color, lab in labs.items():
         values[color] = lab
     return np.linalg.norm(values[:, None, :] - values[None, :, :], axis=2)
+
+
+def _flat_color_mask(rgb: np.ndarray, visible: np.ndarray, minimum_area: int,
+                     cancelled: Callable[[], bool] | None = None) -> tuple[np.ndarray, set[tuple[int, int, int]]]:
+    """Identify contiguous, exactly uniform areas before quantization.
+
+    Only common colors with adjacent equal pixels are considered. The cap
+    bounds the work on highly compressed photos with many repeated colors.
+    """
+    packed = (rgb[:, :, 0].astype(np.uint32) << 16) | (rgb[:, :, 1].astype(np.uint32) << 8) | rgb[:, :, 2].astype(np.uint32)
+    horizontal = visible[:, :-1] & visible[:, 1:] & (packed[:, :-1] == packed[:, 1:])
+    vertical = visible[:-1, :] & visible[1:, :] & (packed[:-1, :] == packed[1:, :])
+    candidates, counts = np.unique(np.concatenate((packed[:, :-1][horizontal],
+                                                    packed[:-1, :][vertical])), return_counts=True)
+    threshold = max(16, minimum_area)
+    eligible = np.flatnonzero(counts >= threshold - 1)
+    eligible = eligible[np.argsort(-counts[eligible], kind="stable")[:64]]
+    protected = np.zeros(visible.shape, dtype=bool)
+    colors = set()
+    for index in eligible:
+        _check_cancel(cancelled)
+        matching = ((packed == candidates[index]) & visible).astype(np.uint8)
+        count, components, stats, _ = cv2.connectedComponentsWithStats(matching, connectivity=4)
+        keep = np.zeros(count, dtype=bool)
+        keep[1:] = stats[1:, cv2.CC_STAT_AREA] >= threshold
+        if np.any(keep):
+            protected |= keep[components]
+            value = int(candidates[index])
+            colors.add(((value >> 16) & 255, (value >> 8) & 255, value & 255))
+    return protected, colors
 
 
 def _merge_adjacent_regions(labels: np.ndarray, visible: np.ndarray,
@@ -135,6 +166,11 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
     alpha = np.asarray(rgba.getchannel("A"), dtype=np.uint8)
     opaque = alpha > 0
     rgb_pixels = np.asarray(rgba.convert("RGB"), dtype=np.uint8).copy()
+    width, height = image.size
+    minimum_feature_px = max(1, math.ceil(width / settings.target_width_mm * settings.min_feature_mm))
+    minimum_area = minimum_feature_px * minimum_feature_px
+    flat_mask, flat_colors = (_flat_color_mask(rgb_pixels, opaque, minimum_area, cancelled)
+                              if settings.protect_distinct_colors else (np.zeros(alpha.shape, dtype=bool), set()))
     if np.any(opaque) and np.any(~opaque):
         # Transparent pixels must not consume palette entries or influence the
         # frequency of visible colors. Train on visible pixels only.
@@ -159,9 +195,6 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
 
     _merge_adjacent_regions(labels, opaque, labs, settings.color_delta, distances, cancelled)
 
-    width, height = image.size
-    minimum_feature_px = max(1, math.ceil(width / settings.target_width_mm * settings.min_feature_mm))
-    minimum_area = minimum_feature_px * minimum_feature_px
     merged_islands = 0
     protected_islands = 0
     narrow_features = 0
@@ -227,10 +260,13 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
         _check_cancel(cancelled)
         color = int(color)
         output_rgb[(labels == color) & opaque] = palette[color * 3:color * 3 + 3]
+    output_rgb[flat_mask] = rgb_pixels[flat_mask]
     output = Image.fromarray(np.dstack((output_rgb, alpha)), "RGBA")
     palette_rgb = np.asarray(palette, dtype=np.uint8).reshape(-1, 3)
-    quantized_changed = np.any(palette_rgb[initial_labels] != rgb_pixels, axis=2) & opaque
-    merged_changed = (labels != initial_labels) & opaque
+    resulting_colors = flat_colors | {tuple(int(c) for c in palette_rgb[int(label)])
+                                     for label in np.unique(labels[opaque & ~flat_mask])}
+    quantized_changed = np.any(palette_rgb[initial_labels] != rgb_pixels, axis=2) & opaque & ~flat_mask
+    merged_changed = (labels != initial_labels) & opaque & ~flat_mask
     original_rgb = rgb_pixels.astype(np.int16)
     changed = np.any(np.abs(output_rgb.astype(np.int16) - original_rgb) > 0, axis=2) & opaque
     changed_mask = Image.fromarray(changed.astype(np.uint8) * 255, "L")
@@ -244,9 +280,10 @@ def simplify_image(image: Image.Image, settings: CleanupSettings,
         quantized_pixels=int(np.count_nonzero(quantized_changed)),
         merged_pixels=int(np.count_nonzero(merged_changed)),
         original_colors=original_colors,
-        resulting_colors=len(np.unique(labels[opaque])) if np.any(opaque) else 0,
+        resulting_colors=len(resulting_colors),
         merged_islands=merged_islands,
         protected_islands=protected_islands,
+        preserved_flat_colors=len(flat_colors),
         minimum_feature_px=minimum_feature_px,
         narrow_features=narrow_features,
     )

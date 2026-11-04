@@ -168,9 +168,9 @@ class MainWindow(QMainWindow):
         self.min_feature_mm = self._double(0.45, 0, 5, 0.05)
         self.colors = QSpinBox(); self.colors.setRange(2, 128); self.colors.setValue(96)
         self.color_delta = self._double(2, 0, 40, 1)
-        self.protect_colors = QCheckBox("保留颜色差异明显的小色块")
+        self.protect_colors = QCheckBox("保留纯色区域和明显不同的小色块")
         self.protect_colors.setChecked(True)
-        self.protect_colors.setToolTip("避免小色块被强行替换成差异明显的邻色；保留的细节仍可能过小而无法打印。")
+        self.protect_colors.setToolTip("保留尺寸足够的连续纯色区域原色，并避免小色块被强行替换成差异明显的邻色；输出颜色数可能超过上限，细节仍可能无法打印。")
         self.resolution = QComboBox()
         self.resolution.addItem("长边 2400 px（推荐）", 2400)
         self.resolution.addItem("长边 4096 px", 4096)
@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
         form.addRow("目标宽度 (mm)", self.width_mm)
         form.addRow("喷嘴直径 (mm)", self.nozzle_mm)
         form.addRow("最小特征宽度 (mm)", self.min_feature_mm)
-        form.addRow("颜色上限", self.colors)
+        form.addRow("颜色上限（不含保护色）", self.colors)
         form.addRow("相近色阈值", self.color_delta)
         form.addRow(self.protect_colors)
         form.addRow("处理模式", self.cleanup_toggle)
@@ -589,6 +589,7 @@ class MainWindow(QMainWindow):
             hole_note = " · 孔附近的轮廓或透明区域无法留出材料边距；当前不会裁孔" if self.hole_toggle.currentIndex() == 0 and not self.hole_safe else ""
             self.status.setText(
                 f"预览就绪 · 调色 {result.original_colors} → {result.resulting_colors} 色 · "
+                f"保留 {result.preserved_flat_colors} 种纯色 · "
                 f"合并 {result.merged_islands} 个小色岛 · 最小特征约 {result.minimum_feature_px}px "
                 f"· 色差保护保留 {result.protected_islands} 个小色岛（可能过小无法打印） "
                 f"(阈值不低于喷嘴 {self.nozzle_mm.currentData():.2f}mm) · 狭窄区域提示 {result.narrow_features} 个\n"

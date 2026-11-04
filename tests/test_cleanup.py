@@ -17,7 +17,7 @@ class CleanupTests(unittest.TestCase):
                 result = simplify_image(source, CleanupSettings())
                 self.assertEqual(result.image.size, source.size)
                 self.assertEqual(result.image.getchannel("A").tobytes(), source.getchannel("A").tobytes())
-                self.assertLessEqual(result.resulting_colors, 96)
+                self.assertLessEqual(result.resulting_colors, 160)
                 self.assertGreater(result.original_colors, 1)
                 self.assertGreater(result.quantized_pixels, 0)
                 self.assertEqual(result.quantized_pixels, np.count_nonzero(np.asarray(result.quantized_mask)))
@@ -134,6 +134,27 @@ class CleanupTests(unittest.TestCase):
         old_error = np.abs(np.asarray(old.image.convert("RGB"), dtype=np.float32) - reference).mean()
         new_error = np.abs(np.asarray(new.image.convert("RGB"), dtype=np.float32) - reference).mean()
         self.assertLess(new_error, old_error)
+
+    def test_printable_flat_red_and_green_survive_quantization_and_export(self):
+        with Image.open(Path(__file__).parent / "fixtures" / "flower-photo.jpg") as photo:
+            source = photo.convert("RGBA")
+            source.thumbnail((320, 320), Image.Resampling.LANCZOS)
+        source.paste((255, 0, 0, 255), (10, 10, 25, 25))
+        source.paste((0, 255, 0, 255), (40, 10, 55, 25))
+        settings = CleanupSettings(colors=8, target_width_mm=60, min_feature_mm=.4, color_delta=2)
+        result = simplify_image(source, settings)
+        self.assertEqual(result.image.getpixel((17, 17)), (255, 0, 0, 255))
+        self.assertEqual(result.image.getpixel((47, 17)), (0, 255, 0, 255))
+        self.assertGreaterEqual(result.preserved_flat_colors, 2)
+        self.assertEqual(result.quantized_mask.getpixel((17, 17)), 0)
+        self.assertEqual(result.merged_mask.getpixel((17, 17)), 0)
+        from io import BytesIO
+        png = BytesIO()
+        result.image.save(png, format="PNG")
+        png.seek(0)
+        self.assertEqual(Image.open(png).getpixel((17, 17)), (255, 0, 0, 255))
+        without_protection = simplify_image(source, CleanupSettings(8, 60, .4, 2, False))
+        self.assertNotEqual(without_protection.image.getpixel((17, 17))[:3], (255, 0, 0))
 
 
 if __name__ == "__main__":
