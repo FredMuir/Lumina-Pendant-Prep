@@ -35,9 +35,9 @@ try {
             if (Test-Path -LiteralPath $licenses) { Copy-Item -LiteralPath $licenses -Destination $target -Recurse }
         }
     }
-    Invoke-WebRequest 'https://www.gnu.org/licenses/lgpl-3.0.txt' -OutFile (Join-Path $notices 'LGPL-3.0.txt')
-    Invoke-WebRequest 'https://www.gnu.org/licenses/gpl-3.0.txt' -OutFile (Join-Path $notices 'GPL-3.0.txt')
-    Invoke-WebRequest 'https://www.apache.org/licenses/LICENSE-2.0.txt' -OutFile (Join-Path $notices 'Apache-2.0.txt')
+    Invoke-WebRequest 'https://raw.githubusercontent.com/spdx/license-list-data/main/text/LGPL-3.0-only.txt' -OutFile (Join-Path $notices 'LGPL-3.0.txt')
+    Invoke-WebRequest 'https://raw.githubusercontent.com/spdx/license-list-data/main/text/GPL-3.0-only.txt' -OutFile (Join-Path $notices 'GPL-3.0.txt')
+    Invoke-WebRequest 'https://raw.githubusercontent.com/spdx/license-list-data/main/text/Apache-2.0.txt' -OutFile (Join-Path $notices 'Apache-2.0.txt')
     Copy-Item -LiteralPath (Join-Path $root 'docs\THIRD_PARTY.md') -Destination $notices
     Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $staging
     & $compiler "/DAppVersion=$version" "/DBundleDir=$staging" "/DOutputDir=$output" (Join-Path $PSScriptRoot 'windows_installer.iss')
