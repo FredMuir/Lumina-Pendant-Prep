@@ -57,6 +57,25 @@ class DepthTests(unittest.TestCase):
                 # Photograph pixels matching the border color are not considered borders.
                 self.assertEqual(mask.getpixel((color.width // 2 - 20, color.height // 2)), 0)
 
+    def test_terraces_have_discrete_levels_and_keep_hole_and_border(self):
+        depth = Image.fromarray(np.tile(np.arange(256, dtype=np.uint8), (5, 1)), "L")
+        color = Image.new("RGBA", depth.size, (255, 255, 255, 255))
+        color.putpixel((5, 2), (0, 0, 0, 0))
+        border = Image.new("L", depth.size, 0)
+        border.putpixel((20, 2), 255)
+        continuous = depth_heightmap(depth, color, False, 1)
+        self.assertGreater(len(set(continuous.getdata())), 32)
+        for direction in (False, True):
+            for strength in (.5, 1, 2):
+                for high in (False, True):
+                    result = depth_heightmap(depth, color, direction, strength, border, high, 6)
+                    self.assertEqual(result.getpixel((5, 2)), 0)
+                    self.assertEqual(result.getpixel((20, 2)), 255 if high else 0)
+                    self.assertLessEqual(len(set(result.getdata())), 6)
+                    self.assertTrue(set(result.getdata()).issubset({0, 51, 102, 153, 204, 255}))
+        with self.assertRaises(ValueError):
+            depth_heightmap(depth, color, False, 1, terrace_levels=1)
+
     def test_alignment_hole_border_and_direction(self):
         photo = Path(__file__).parent / "fixtures" / "cat-photo.jpg"
         with Image.open(photo) as opened:

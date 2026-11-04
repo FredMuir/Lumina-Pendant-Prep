@@ -318,6 +318,11 @@ class MainWindow(QMainWindow):
         self.heightmap_enabled = QCheckBox("启用 AI 深度高度图")
         self.heightmap_direction = QComboBox()
         self.heightmap_direction.addItems(["近处凸起", "远处凸起"])
+        self.heightmap_style = QComboBox()
+        self.heightmap_style.addItems(["连续渐变", "梯田分层（清晰边界）"])
+        self.heightmap_style.setToolTip("连续渐变保留平滑高度变化；梯田分层将深度归入固定高度，形成清晰台阶。")
+        self.heightmap_levels = QSpinBox(); self.heightmap_levels.setRange(2, 32); self.heightmap_levels.setValue(6)
+        self.heightmap_levels.setToolTip("分层模式中的灰度高度数量；实际毫米层高由 Lumina 设置。")
         self.heightmap_border = QComboBox()
         self.heightmap_border.addItems(["最低（黑色）", "最高（白色）"])
         self.heightmap_border.setToolTip("统一设置外边框和孔边框的高度，不受深度方向或强度影响；透明孔保持黑色。")
@@ -332,9 +337,13 @@ class MainWindow(QMainWindow):
         self.heightmap_enabled.toggled.connect(self._heightmap_options_changed)
         self.heightmap_direction.currentIndexChanged.connect(self._heightmap_options_changed)
         self.heightmap_strength.valueChanged.connect(self._heightmap_options_changed)
+        self.heightmap_style.currentIndexChanged.connect(self._heightmap_options_changed)
+        self.heightmap_levels.valueChanged.connect(self._heightmap_options_changed)
         self.heightmap_border.currentIndexChanged.connect(self._heightmap_options_changed)
         height_form.addRow(self.heightmap_enabled)
         height_form.addRow("高度方向", self.heightmap_direction)
+        height_form.addRow("高度图类型", self.heightmap_style)
+        height_form.addRow("梯田高度层数", self.heightmap_levels)
         height_form.addRow("高度图强度", self.heightmap_strength)
         height_form.addRow("边框高度", self.heightmap_border)
         height_form.addRow(self.heightmap_generate_button)
@@ -509,6 +518,8 @@ class MainWindow(QMainWindow):
             self.depth_job.cancel()
         self.heightmap_direction.setEnabled(enabled)
         self.heightmap_strength.setEnabled(enabled)
+        self.heightmap_style.setEnabled(enabled)
+        self.heightmap_levels.setEnabled(enabled and self.heightmap_style.currentIndex() == 1)
         self.heightmap_border.setEnabled(enabled)
         ready = self.depth_raw is not None and self.depth_generation == self.generation
         self.heightmap_generate_button.setEnabled(enabled and self.depth_job is None)
@@ -1200,6 +1211,8 @@ class MainWindow(QMainWindow):
             self.heightmap_enabled.setChecked(data.get("heightmap_enabled", False))
             self.heightmap_direction.setCurrentIndex(1 if data.get("heightmap_far_high", False) else 0)
             self.heightmap_strength.setValue(data.get("heightmap_strength_percent", 100))
+            self.heightmap_style.setCurrentIndex(1 if data.get("heightmap_terraced", False) else 0)
+            self.heightmap_levels.setValue(data.get("heightmap_terrace_levels", 6))
             self.heightmap_border.setCurrentIndex(1 if data.get("heightmap_border_high", False) else 0)
             self._heightmap_options_changed()
             self._update_border_buttons()
@@ -1309,7 +1322,8 @@ class MainWindow(QMainWindow):
     def _current_depth_heightmap(self):
         return depth_heightmap(self.depth_raw, self.output, self.heightmap_direction.currentIndex() == 1,
                                self.heightmap_strength.value() / 100.0, self.depth_border_mask,
-                               self.heightmap_border.currentIndex() == 1)
+                               self.heightmap_border.currentIndex() == 1,
+                               self.heightmap_levels.value() if self.heightmap_style.currentIndex() == 1 else None)
 
     def show_depth_preview(self):
         if self.depth_raw is None or self.depth_generation != self.generation:
@@ -1436,6 +1450,8 @@ class MainWindow(QMainWindow):
             "heightmap_enabled": self.heightmap_enabled.isChecked(),
             "heightmap_far_high": self.heightmap_direction.currentIndex() == 1,
             "heightmap_strength_percent": self.heightmap_strength.value(),
+            "heightmap_terraced": self.heightmap_style.currentIndex() == 1,
+            "heightmap_terrace_levels": self.heightmap_levels.value(),
             "heightmap_border_high": self.heightmap_border.currentIndex() == 1,
         }
 

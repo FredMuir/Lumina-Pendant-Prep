@@ -87,7 +87,7 @@ def align_depth(depth: np.ndarray, color: Image.Image, settings, border_mask=Non
 
 
 def depth_heightmap(depth: Image.Image, color: Image.Image, far_high: bool, strength: float,
-                    border_mask=None, border_high=False) -> Image.Image:
+                    border_mask=None, border_high=False, terrace_levels=None) -> Image.Image:
     if depth.size != color.size or not 0 <= strength <= 2:
         raise ValueError("高度图尺寸或强度无效。")
     image = depth.convert("L")
@@ -95,6 +95,12 @@ def depth_heightmap(depth: Image.Image, color: Image.Image, far_high: bool, stre
         image = ImageOps.invert(image)
     if strength != 1:
         image = image.point(lambda value: min(255, round(value * strength)))
+    if terrace_levels is not None:
+        if type(terrace_levels) is not int or not 2 <= terrace_levels <= 32:
+            raise ValueError("梯田高度层数必须为 2 到 32。")
+        # Map intensity to evenly spaced plateaus, including exact black/white.
+        levels = terrace_levels - 1
+        image = image.point(lambda value: round(round(value * levels / 255) * 255 / levels))
     result = ImageChops.multiply(image, color.convert("RGBA").getchannel("A"))
     if border_mask is not None:
         if border_mask.size != color.size:
