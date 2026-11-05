@@ -327,6 +327,10 @@ class MainWindow(QMainWindow):
         self.depth_cleanup.setChecked(True)
         self.depth_cleanup_mm = self._double(.4, .05, 2, .05)
         self.depth_cleanup_mm.setToolTip("梯田模式合并小于此尺寸平方的孤立高度区域；连续模式去除小噪点。数值越大细节损失可能越多。")
+        self.depth_contour = QCheckBox("梯田边界平直化")
+        self.depth_contour.setChecked(True)
+        self.depth_contour_mm = self._double(.2, .05, 2, .05)
+        self.depth_contour_mm.setToolTip("简化高度区域轮廓，减少弯曲和毛刺；数值越大边界越平直，但细枝和小细节可能消失。")
         self.heightmap_border = QComboBox()
         self.heightmap_border.addItems(["最低（黑色）", "最高（白色）"])
         self.heightmap_border.setToolTip("统一设置外边框和孔边框的高度，不受深度方向或强度影响；透明孔保持黑色。")
@@ -345,6 +349,8 @@ class MainWindow(QMainWindow):
         self.heightmap_levels.valueChanged.connect(self._heightmap_options_changed)
         self.depth_cleanup.toggled.connect(self._heightmap_options_changed)
         self.depth_cleanup_mm.valueChanged.connect(self._heightmap_options_changed)
+        self.depth_contour.toggled.connect(self._heightmap_options_changed)
+        self.depth_contour_mm.valueChanged.connect(self._heightmap_options_changed)
         self.heightmap_border.currentIndexChanged.connect(self._heightmap_options_changed)
         height_form.addRow(self.heightmap_enabled)
         height_form.addRow("高度方向", self.heightmap_direction)
@@ -352,6 +358,8 @@ class MainWindow(QMainWindow):
         height_form.addRow("梯田高度层数", self.heightmap_levels)
         height_form.addRow(self.depth_cleanup)
         height_form.addRow("最小高度区域尺寸 (mm)", self.depth_cleanup_mm)
+        height_form.addRow(self.depth_contour)
+        height_form.addRow("边界简化幅度 (mm)", self.depth_contour_mm)
         height_form.addRow("高度图强度", self.heightmap_strength)
         height_form.addRow("边框高度", self.heightmap_border)
         height_form.addRow(self.heightmap_generate_button)
@@ -530,6 +538,8 @@ class MainWindow(QMainWindow):
         self.heightmap_levels.setEnabled(enabled and self.heightmap_style.currentIndex() == 1)
         self.depth_cleanup.setEnabled(enabled)
         self.depth_cleanup_mm.setEnabled(enabled and self.depth_cleanup.isChecked())
+        self.depth_contour.setEnabled(enabled and self.heightmap_style.currentIndex() == 1)
+        self.depth_contour_mm.setEnabled(enabled and self.heightmap_style.currentIndex() == 1 and self.depth_contour.isChecked())
         self.heightmap_border.setEnabled(enabled)
         ready = self.depth_raw is not None and self.depth_generation == self.generation
         self.heightmap_generate_button.setEnabled(enabled and self.depth_job is None)
@@ -1225,6 +1235,8 @@ class MainWindow(QMainWindow):
             self.heightmap_levels.setValue(data.get("heightmap_terrace_levels", 6))
             self.depth_cleanup.setChecked(data.get("depth_cleanup", True))
             self.depth_cleanup_mm.setValue(data.get("depth_cleanup_mm", .4))
+            self.depth_contour.setChecked(data.get("depth_contour", True))
+            self.depth_contour_mm.setValue(data.get("depth_contour_mm", .2))
             self.heightmap_border.setCurrentIndex(1 if data.get("heightmap_border_high", False) else 0)
             self._heightmap_options_changed()
             self._update_border_buttons()
@@ -1336,7 +1348,8 @@ class MainWindow(QMainWindow):
                                self.heightmap_strength.value() / 100.0, self.depth_border_mask,
                                self.heightmap_border.currentIndex() == 1,
                                self.heightmap_levels.value() if self.heightmap_style.currentIndex() == 1 else None,
-                               self.depth_cleanup_mm.value() if self.depth_cleanup.isChecked() else 0)
+                               self.depth_cleanup_mm.value() if self.depth_cleanup.isChecked() else 0,
+                               self.depth_contour_mm.value() if self.depth_contour.isChecked() else 0)
 
     def show_depth_preview(self):
         if self.depth_raw is None or self.depth_generation != self.generation:
@@ -1467,6 +1480,8 @@ class MainWindow(QMainWindow):
             "heightmap_terrace_levels": self.heightmap_levels.value(),
             "depth_cleanup": self.depth_cleanup.isChecked(),
             "depth_cleanup_mm": self.depth_cleanup_mm.value(),
+            "depth_contour": self.depth_contour.isChecked(),
+            "depth_contour_mm": self.depth_contour_mm.value(),
             "heightmap_border_high": self.heightmap_border.currentIndex() == 1,
         }
 

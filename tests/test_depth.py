@@ -90,6 +90,32 @@ class DepthTests(unittest.TestCase):
         self.assertEqual(result.getpixel((1, 1)), 0)
         self.assertEqual(result.getpixel((20, 21)), 120)
 
+    def test_terrace_contours_straighten_without_blending_or_filling_holes(self):
+        import cv2
+        values = np.full((100, 120), 51, dtype=np.uint8)
+        for y in range(15, 85):
+            values[y, 30 + (y % 4):100] = 204
+        values[40:60, 60:80] = 51
+        depth = Image.fromarray(values, "L")
+        color = Image.new("RGBA", depth.size, (255, 255, 255, 255))
+        color.info["dpi"] = (254, 254)
+        color.putpixel((50, 50), (0, 0, 0, 0))
+        border = Image.new("L", depth.size, 0)
+        border.putpixel((5, 5), 255)
+        original = depth_heightmap(depth, color, False, 1, border, True, 6)
+        simplified = depth_heightmap(depth, color, False, 1, border, True, 6, contour_mm=.4)
+        a = np.asarray(original); b = np.asarray(simplified)
+        def perimeter(image):
+            curves, _ = cv2.findContours((image == 204).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            return sum(cv2.arcLength(c, True) for c in curves)
+        self.assertLess(perimeter(b), perimeter(a))
+        self.assertEqual(simplified.getpixel((50, 50)), 0)
+        self.assertEqual(simplified.getpixel((5, 5)), 255)
+        self.assertEqual(simplified.getpixel((70, 50)), 51)  # Interior hole remains low.
+        self.assertEqual(simplified.getpixel((90, 50)), 204)
+        self.assertTrue(set(np.unique(b)).issubset({0, 51, 204, 255}))
+        self.assertEqual(depth_heightmap(depth, color, False, 1, border, True, 6, contour_mm=0).tobytes(), original.tobytes())
+
     def test_terraces_have_discrete_levels_and_keep_hole_and_border(self):
         depth = Image.fromarray(np.tile(np.arange(256, dtype=np.uint8), (5, 1)), "L")
         color = Image.new("RGBA", depth.size, (255, 255, 255, 255))

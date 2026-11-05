@@ -115,9 +115,41 @@ def clean_depth_islands(image: Image.Image, valid: np.ndarray, minimum_area: int
     return Image.fromarray(heights, "L")
 
 
+def straighten_terraces(image: Image.Image, valid: np.ndarray, tolerance_px: float) -> Image.Image:
+    """Simplify nested height contours without introducing intermediate heights."""
+    if tolerance_px <= 0 or not np.any(valid):
+        return image
+    values = np.asarray(image, dtype=np.uint8)
+    levels = np.unique(values[valid])
+    if len(levels) < 2:
+        return image
+    result = values.copy()
+    result[valid] = levels[0]
+    previous = valid.copy()
+    for level in levels[1:]:
+        mask = ((values >= level) & valid).astype(np.uint8)
+        contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        if hierarchy is None:
+            continue
+        simplified = [cv2.approxPolyDP(c, tolerance_px, True) if len(c) >= 3 else c for c in contours]
+        filled = np.zeros(mask.shape, np.uint8)
+        # Parents precede their descendants; alternate white foreground and
+        # black holes to retain nested cutouts and internal height regions.
+        for i, contour in enumerate(simplified):
+            parent, depth = int(hierarchy[0, i, 3]), 0
+            while parent >= 0:
+                depth += 1
+                parent = int(hierarchy[0, parent, 3])
+            cv2.drawContours(filled, simplified, i, 255 if depth % 2 == 0 else 0, cv2.FILLED)
+        region = (filled > 0) & previous & valid
+        result[region] = level
+        previous = region
+    return Image.fromarray(result, "L")
+
+
 def depth_heightmap(depth: Image.Image, color: Image.Image, far_high: bool, strength: float,
                     border_mask=None, border_high=False, terrace_levels=None,
-                    cleanup_mm=0) -> Image.Image:
+                    cleanup_mm=0, contour_mm=0) -> Image.Image:
     if depth.size != color.size or not 0 <= strength <= 2:
         raise ValueError("高度图尺寸或强度无效。")
     image = depth.convert("L")
@@ -153,6 +185,20 @@ def depth_heightmap(depth: Image.Image, color: Image.Image, far_high: bool, stre
             filtered = cv2.medianBlur(values, kernel)
             values[valid_interior] = filtered[valid_interior]
             image = Image.fromarray(values, "L")
+    if not 0 <= contour_mm <= 2:
+        raise ValueError("高度图轮廓简化尺寸无效。")
+    if terrace_levels is not None and contour_mm:
+        alpha = np.asarray(color.convert("RGBA").getchannel("A"), dtype=np.uint8)
+        valid = alpha == 255
+        if border_mask is not None:
+            if border_mask.size != color.size:
+                raise ValueError("边框蒙版尺寸不一致。")
+            valid &= np.asarray(border_mask, dtype=np.uint8) == 0
+        dpi = color.info.get("dpi", (300, 300))[0]
+        image = straighten_terraces(image, valid, contour_mm * dpi / 25.4)
+        if cleanup_mm:
+            feature_px = max(1, round(cleanup_mm * dpi / 25.4))
+            image = clean_depth_islands(image, valid, feature_px * feature_px)
     result = ImageChops.multiply(image, color.convert("RGBA").getchannel("A"))
     if border_mask is not None:
         if border_mask.size != color.size:
