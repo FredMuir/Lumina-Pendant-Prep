@@ -147,3 +147,5 @@ python -m unittest discover -s tests -v
 ## 参考资料
 
 Windows 首发目标与验收见 [`docs/GOALS.md`](docs/GOALS.md)；详细技术决策见 [`docs/PLAN.md`](docs/PLAN.md)；实拍照片来源、测试矩阵与打印验收见 [`docs/PHOTO_VALIDATION.md`](docs/PHOTO_VALIDATION.md)。
+
+可关闭“启用图片色彩处理”，跳过量化、合并及色彩平滑，仍可裁切、添加边框和挂绳孔或生成高度图。选择原始分辨率可避免缩放；形状和透明孔仍按当前设置生效。

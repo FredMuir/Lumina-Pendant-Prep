@@ -290,9 +290,14 @@ class MainWindow(QMainWindow):
         self.resolution.addItem("长边 2400 px（推荐）", 2400)
         self.resolution.addItem("长边 4096 px", 4096)
         self.resolution.addItem("原始分辨率（耗内存）", 0)
+        self.color_processing_enabled = QCheckBox("启用图片色彩处理")
+        self.color_processing_enabled.setChecked(True)
+        self.color_processing_enabled.setToolTip("关闭后跳过颜色量化、色块合并和色彩平滑；仍可裁切、添加边框和挂绳孔以及生成高度图。选择原始分辨率可避免缩放。")
         self.cleanup_toggle = QComboBox(); self.cleanup_toggle.addItems(["净化色块", "保留原色"])
+        self.color_processing_enabled.toggled.connect(lambda checked: self.cleanup_toggle.setCurrentIndex(0 if checked else 1))
         self.cleanup_toggle.setToolTip("保留原色会跳过颜色量化和色块合并，仍会应用裁切和透明孔。")
         self.cleanup_toggle.currentIndexChanged.connect(self._update_cleanup_controls)
+        form.addRow(self.color_processing_enabled)
         form.addRow("目标宽度 (mm)", self.width_mm)
         form.addRow("喷嘴直径 (mm)", self.nozzle_mm)
         form.addRow("最小特征宽度 (mm)", self.min_feature_mm)
@@ -305,7 +310,6 @@ class MainWindow(QMainWindow):
         form.addRow("边缘平滑强度", self.smooth_strength)
         form.addRow(self.protect_colors)
         form.addRow("小色块最大合并色差", self.distinct_delta)
-        form.addRow("处理模式", self.cleanup_toggle)
         form.addRow("输出分辨率", self.resolution)
         gentle_preset = QPushButton("温和预设（试用）")
         gentle_preset.setToolTip("启用净化和色彩保护，颜色上限 128，相近色阈值 1，最小特征宽度设为当前喷嘴直径；效果需通过预览和打印确认。")
@@ -518,6 +522,8 @@ class MainWindow(QMainWindow):
 
     def _update_cleanup_controls(self, *_):
         enabled = self.cleanup_toggle.currentIndex() == 0
+        with QSignalBlocker(self.color_processing_enabled):
+            self.color_processing_enabled.setChecked(enabled)
         self.colors.setEnabled(enabled)
         self.quantization_level.setEnabled(enabled)
         self.color_delta.setEnabled(enabled)

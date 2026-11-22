@@ -79,6 +79,19 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertTrue({(16, 16), (32, 32), (48, 48), (256, 256)} <= icon.ico.sizes())
         window.close()
 
+    def test_color_processing_switch_preserves_project_state(self):
+        window = MainWindow()
+        self.assertTrue(window.color_processing_enabled.isChecked())
+        window.color_processing_enabled.setChecked(False)
+        self.assertEqual(window.cleanup_toggle.currentText(), "保留原色")
+        self.assertFalse(window._project_data()["cleanup"])
+        self.assertFalse(window.colors.isEnabled())
+        window._apply_history({**window._project_data(), "cleanup": True})
+        self.assertTrue(window.color_processing_enabled.isChecked())
+        window._apply_history({**window._project_data(), "cleanup": False})
+        self.assertFalse(window.color_processing_enabled.isChecked())
+        window.close()
+
     def test_open_does_not_start_processing_until_enabled(self):
         photo = Path(__file__).parent / "fixtures" / "flower-photo.jpg"
         window = MainWindow()
